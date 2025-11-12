@@ -93,6 +93,7 @@ async def set_bot_commands():
     commands = [
         BotCommand(command="start", description="🚀 Начать работу с ботом"),
         BotCommand(command="play", description="🎮 Создать новую игру"),
+        BotCommand(command="stop", description="⏹ Отменить текущую игру"),
         BotCommand(command="help", description="❓ Помощь и инструкции"),
         BotCommand(command="rules", description="📖 Правила игры"),
     ]
@@ -244,8 +245,42 @@ async def send_battle_message(game: GameState, player_id: str, chat_id: int):
         timer_text = f"\n⏱ Осталось: {minutes}:{seconds:02d}"
     
     # Создаем копию своего поля для отображения атак противника
-    # player.board уже содержит все атаки противника (🔥, ❌, ⚫)
-    display_board = [row[:] for row in player.board]
+    # Показываем только попадания (🔥, ❌), но не показываем мимо (⚫)
+    # ⚫ может быть как мимо, так и заблокированной клеткой вокруг корабля
+    # Показываем ⚫ только если это заблокированная клетка (рядом с уничтоженным кораблем)
+    display_board = []
+    for r in range(config['size']):
+        row = []
+        for c in range(config['size']):
+            cell = player.board[r][c]
+            # Если это корабль, показываем его
+            if cell == '🟥':
+                row.append('🟥')
+            # Если это попадание или уничтоженный корабль, показываем
+            elif cell in ['🔥', '❌']:
+                row.append(cell)
+            # Если это ⚫, проверяем, это мимо или заблокированная клетка
+            elif cell == '⚫':
+                # Проверяем, есть ли рядом уничтоженный корабль
+                is_blocked = False
+                for dr in [-1, 0, 1]:
+                    for dc in [-1, 0, 1]:
+                        nr, nc = r + dr, c + dc
+                        if 0 <= nr < config['size'] and 0 <= nc < config['size']:
+                            if player.board[nr][nc] == '❌':
+                                is_blocked = True
+                                break
+                    if is_blocked:
+                        break
+                # Показываем ⚫ только если это заблокированная клетка, иначе показываем море
+                if is_blocked:
+                    row.append('⚫')
+                else:
+                    row.append('🌊')
+            else:
+                # Море или другое
+                row.append('🌊')
+        display_board.append(row)
     
     # Сообщение с моим полем (сверху)
     my_text = f"🎮 Игра с @{opponent.username}\n\n"
@@ -257,10 +292,27 @@ async def send_battle_message(game: GameState, player_id: str, chat_id: int):
     
     # Информационное табло (посередине)
     info_text = "📊 ИНФОРМАЦИОННОЕ ТАБЛО\n\n"
+    
+    # Чей ход
+    current_player_name = player.username if is_my_turn else opponent.username
+    info_text += f"👆 Ход: @{current_player_name}\n"
+    
+    # Таймер (если есть)
+    if game.is_timed and game.last_move_time:
+        elapsed = datetime.now().timestamp() - game.last_move_time
+        remaining = max(0, game.time_limit - int(elapsed))
+        minutes = remaining // 60
+        seconds = remaining % 60
+        info_text += f"⏱ Время: {minutes}:{seconds:02d}\n"
+    
+    info_text += "\n"
+    
+    # Последний ход
     if game.last_move_info:
         info_text += f"Последний ход: {game.last_move_info}\n"
     else:
         info_text += "Ожидание первого хода...\n"
+    
     info_text += f"\n✅ Ваши корабли: {get_remaining_ships(player)}\n"
     info_text += f"🎯 Корабли противника: {get_remaining_ships(opponent)}"
     
@@ -471,6 +523,131 @@ async def cmd_play(message: Message):
     
     msg = await message.answer(text, reply_markup=get_mode_keyboard())
     game.setup_message_id = msg.message_id
+    # Если игра в группе, сохраняем ID сообщения
+    if game.group_id:
+        game.group_messages.append(msg.message_id)
+
+
+@dp.message(Command("stop"))
+async def cmd_stop(message: Message):
+    """Команда /stop - отменить текущую игру в группе"""
+    # Работает только в группах
+    if message.chat.type == "private":
+        await message.answer("Эта команда работает только в группах. Используйте кнопку 'Завершить' во время игры.")
+        return
+    
+    group_id = message.chat.id
+    
+    # Ищем игру в этой группе
+    game_to_stop = None
+    for game_id, game in games.items():
+        if game.group_id == group_id:
+            game_to_stop = (game_id, game)
+            break
+    
+    if not game_to_stop:
+        await message.answer("В этой группе нет активной игры.")
+        return
+    
+    game_id, game = game_to_stop
+    p1 = game.get_player('p1')
+    p2 = game.get_player('p2')
+    
+    # Проверяем права: создатель игры или администратор группы
+    is_creator = p1 and p1.user_id == message.from_user.id
+    is_admin = False
+    
+    if not is_creator:
+        # Проверяем, является ли пользователь администратором группы
+        try:
+            chat_member = await bot.get_chat_member(chat_id=group_id, user_id=message.from_user.id)
+            is_admin = chat_member.status in ['administrator', 'creator']
+        except:
+            pass
+    
+    if not is_creator and not is_admin:
+        await message.answer("❌ Только создатель игры или администратор группы может отменить игру.")
+        return
+    
+    # Удаляем все сообщения игры
+    if p1:
+        if p1.setup_message_id:
+            try:
+                await bot.delete_message(chat_id=p1.user_id, message_id=p1.setup_message_id)
+            except:
+                pass
+        if p1.my_board_message_id:
+            try:
+                await bot.delete_message(chat_id=p1.user_id, message_id=p1.my_board_message_id)
+            except:
+                pass
+        if p1.info_message_id:
+            try:
+                await bot.delete_message(chat_id=p1.user_id, message_id=p1.info_message_id)
+            except:
+                pass
+        if p1.enemy_board_message_id:
+            try:
+                await bot.delete_message(chat_id=p1.user_id, message_id=p1.enemy_board_message_id)
+            except:
+                pass
+    
+    if p2:
+        if p2.setup_message_id:
+            try:
+                await bot.delete_message(chat_id=p2.user_id, message_id=p2.setup_message_id)
+            except:
+                pass
+        if p2.my_board_message_id:
+            try:
+                await bot.delete_message(chat_id=p2.user_id, message_id=p2.my_board_message_id)
+            except:
+                pass
+        if p2.info_message_id:
+            try:
+                await bot.delete_message(chat_id=p2.user_id, message_id=p2.info_message_id)
+            except:
+                pass
+        if p2.enemy_board_message_id:
+            try:
+                await bot.delete_message(chat_id=p2.user_id, message_id=p2.enemy_board_message_id)
+            except:
+                pass
+    
+    # Уведомляем игроков в личку
+    cancel_text = "⏹ Игра отменена\n\n"
+    cancel_text += f"Игра в группе была отменена {'создателем' if is_creator else 'администратором группы'}."
+    
+    if p1:
+        try:
+            await bot.send_message(chat_id=p1.user_id, text=cancel_text)
+        except:
+            pass
+    
+    if p2:
+        try:
+            await bot.send_message(chat_id=p2.user_id, text=cancel_text)
+        except:
+            pass
+    
+    # Удаляем все сообщения бота в группе
+    if game.group_messages:
+        for msg_id in game.group_messages:
+            try:
+                await bot.delete_message(chat_id=group_id, message_id=msg_id)
+            except:
+                pass
+    
+    # Сообщение в группу
+    user_name = message.from_user.username or message.from_user.first_name or "Пользователь"
+    group_text = f"⏹ Игра отменена\n\n"
+    group_text += f"Игра была отменена {'создателем' if is_creator else 'администратором'} @{user_name}."
+    
+    await message.answer(group_text)
+    
+    # Удаляем игру
+    if game.id in games:
+        del games[game.id]
 
 
 @dp.callback_query(F.data.startswith("mode_"))
@@ -701,6 +878,51 @@ async def cmd_start(message: Message, command: CommandStart):
         if p1:
             await send_setup_message(game, 'p1', p1.user_id)
         await send_setup_message(game, 'p2', p2.user_id)
+        
+        # Если игра в группе, отправляем уведомление в группу
+        if game.group_id:
+            try:
+                # Формируем ссылки на игроков
+                # Для p1: если есть username, используем @username, иначе ссылку с именем
+                if p1 and p1.username:
+                    p1_link = f"@{p1.username}"
+                elif p1:
+                    # Пытаемся получить информацию о пользователе через API
+                    try:
+                        p1_user = await bot.get_chat(p1.user_id)
+                        p1_name = p1_user.first_name or p1_user.username or f"Игрок {p1.user_id}"
+                        p1_link = f"[{p1_name}](tg://user?id={p1.user_id})"
+                    except:
+                        p1_link = f"[{p1.username}](tg://user?id={p1.user_id})"
+                else:
+                    p1_link = "Игрок 1"
+                
+                # Для p2: используем данные из message.from_user
+                if p2.username:
+                    p2_link = f"@{p2.username}"
+                else:
+                    p2_name = message.from_user.first_name or message.from_user.username or f"Игрок {p2.user_id}"
+                    p2_link = f"[{p2_name}](tg://user?id={p2.user_id})"
+                
+                group_notification = "🎮 Игра началась!\n\n"
+                group_notification += f"👥 Игроки:\n"
+                group_notification += f"1️⃣ {p1_link}\n"
+                group_notification += f"2️⃣ {p2_link}\n\n"
+                group_notification += f"Режим: {'Обычный (8×8)' if game.mode == 'classic' else 'Быстрый (6×6)'}\n"
+                group_notification += f"Таймер: {'включен' if game.is_timed else 'выключен'}"
+                
+                msg = await bot.send_message(
+                    chat_id=game.group_id,
+                    text=group_notification,
+                    parse_mode="Markdown"
+                )
+                # Сохраняем ID сообщения в группе
+                game.group_messages.append(msg.message_id)
+            except Exception as e:
+                # Если не удалось отправить в группу (например, бот не может отправлять сообщения),
+                # просто игнорируем ошибку
+                print(f"Не удалось отправить уведомление в группу: {e}")
+                pass
     else:
         bot_info = await get_bot_info()
         await message.answer(
@@ -1439,14 +1661,59 @@ async def end_game(game: GameState):
     await bot.send_message(chat_id=winner.user_id, text=winner_text, reply_markup=winner_kb)
     await bot.send_message(chat_id=loser.user_id, text=loser_text, reply_markup=loser_kb)
     
-    # Сообщение в группу, если игра была создана там
+    # Отправляем результаты в группу, если игра была создана там
     if game.group_id:
-        group_text = f"🏆 Победил @{winner.username}!\n"
-        group_text += f"Режим: {'Обычный' if game.mode == 'classic' else 'Быстрый'}"
         try:
-            await bot.send_message(chat_id=game.group_id, text=group_text)
-        except:
+            # Формируем ссылки на игроков
+            if winner.username:
+                winner_link = f"@{winner.username}"
+            else:
+                try:
+                    winner_user = await bot.get_chat(winner.user_id)
+                    winner_name = winner_user.first_name or winner_user.username or f"Игрок {winner.user_id}"
+                    winner_link = f"[{winner_name}](tg://user?id={winner.user_id})"
+                except:
+                    winner_link = f"@{winner.username}"
+            
+            if loser.username:
+                loser_link = f"@{loser.username}"
+            else:
+                try:
+                    loser_user = await bot.get_chat(loser.user_id)
+                    loser_name = loser_user.first_name or loser_user.username or f"Игрок {loser.user_id}"
+                    loser_link = f"[{loser_name}](tg://user?id={loser.user_id})"
+                except:
+                    loser_link = f"@{loser.username}"
+            
+            winner_ships = get_remaining_ships(winner)
+            loser_ships = get_remaining_ships(loser)
+            
+            group_result = "🏆 Игра завершена!\n\n"
+            group_result += f"👑 Победитель: {winner_link}\n"
+            group_result += f"😔 Проигравший: {loser_link}\n\n"
+            group_result += f"📊 Результаты:\n"
+            group_result += f"✅ {winner_link}: {winner_ships} кораблей осталось\n"
+            group_result += f"❌ {loser_link}: {loser_ships} кораблей осталось\n\n"
+            group_result += f"Режим: {'Обычный (8×8)' if game.mode == 'classic' else 'Быстрый (6×6)'}"
+            
+            result_msg = await bot.send_message(
+                chat_id=game.group_id,
+                text=group_result,
+                parse_mode="Markdown"
+            )
+            # Сохраняем ID сообщения с результатами для последующего удаления
+            game.group_messages.append(result_msg.message_id)
+        except Exception as e:
+            print(f"Не удалось отправить результаты в группу: {e}")
             pass
+    
+    # Удаляем все сообщения бота в группе, если игра была создана там
+    if game.group_id and game.group_messages:
+        for msg_id in game.group_messages:
+            try:
+                await bot.delete_message(chat_id=game.group_id, message_id=msg_id)
+            except:
+                pass
     
     # Удаляем игру
     if game.id in games:
@@ -1583,6 +1850,14 @@ async def callback_confirm_stop(callback: CallbackQuery):
         await callback.message.delete()
     except:
         pass
+    
+    # Удаляем все сообщения бота в группе, если игра была создана там
+    if game.group_id and game.group_messages:
+        for msg_id in game.group_messages:
+            try:
+                await bot.delete_message(chat_id=game.group_id, message_id=msg_id)
+            except:
+                pass
     
     # Удаляем игру
     if game.id in games:
@@ -1756,6 +2031,7 @@ async def cmd_help(message: Message):
         f"• Используйте 🚩 Сдаться для завершения игры\n\n"
         f"📋 Команды:\n"
         f"/play - создать новую игру\n"
+        f"/stop - отменить текущую игру (только в группах)\n"
         f"/rules - правила игры\n"
         f"/help - эта справка\n\n"
         f"Используйте /rules для подробных правил игры."

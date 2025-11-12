@@ -42,6 +42,7 @@ class GameState:
     rematch_opponent_id: Optional[int] = None  # ID противника для реванша
     setup_message_id: Optional[int] = None  # ID последнего сообщения настройки игры (для создателя)
     last_move_info: Optional[str] = None  # Информация о последнем ходе (мимо, попал, уничтожил)
+    group_messages: list[int] = field(default_factory=list)  # ID сообщений бота в группе
     
     def get_opponent(self, player_id: str) -> Optional[Player]:
         """Получить оппонента"""
