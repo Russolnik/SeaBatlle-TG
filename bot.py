@@ -530,23 +530,30 @@ async def cmd_play(message: Message):
 
 @dp.message(Command("stop"))
 async def cmd_stop(message: Message):
-    """Команда /stop - отменить текущую игру в группе"""
-    # Работает только в группах
-    if message.chat.type == "private":
-        await message.answer("Эта команда работает только в группах. Используйте кнопку 'Завершить' во время игры.")
-        return
+    """Команда /stop - отменить текущую игру"""
+    user_id = message.from_user.id
     
-    group_id = message.chat.id
-    
-    # Ищем игру в этой группе
+    # Ищем игру по пользователю или по группе
     game_to_stop = None
-    for game_id, game in games.items():
-        if game.group_id == group_id:
+    if message.chat.type == "private":
+        # В личных сообщениях ищем игру по user_id
+        existing = get_game_by_user(user_id)
+        if existing:
+            game_id, game, player_id = existing
             game_to_stop = (game_id, game)
-            break
+    else:
+        # В группах ищем игру по group_id
+        group_id = message.chat.id
+        for game_id, game in games.items():
+            if game.group_id == group_id:
+                game_to_stop = (game_id, game)
+                break
     
     if not game_to_stop:
-        await message.answer("В этой группе нет активной игры.")
+        if message.chat.type == "private":
+            await message.answer("У вас нет активной игры. Используйте кнопку 'Завершить' во время игры.")
+        else:
+            await message.answer("В этой группе нет активной игры.")
         return
     
     game_id, game = game_to_stop
@@ -554,19 +561,22 @@ async def cmd_stop(message: Message):
     p2 = game.get_player('p2')
     
     # Проверяем права: создатель игры или администратор группы
-    is_creator = p1 and p1.user_id == message.from_user.id
+    is_creator = p1 and p1.user_id == user_id
     is_admin = False
     
-    if not is_creator:
+    if not is_creator and message.chat.type != "private":
         # Проверяем, является ли пользователь администратором группы
         try:
-            chat_member = await bot.get_chat_member(chat_id=group_id, user_id=message.from_user.id)
+            chat_member = await bot.get_chat_member(chat_id=message.chat.id, user_id=user_id)
             is_admin = chat_member.status in ['administrator', 'creator']
         except:
             pass
     
     if not is_creator and not is_admin:
-        await message.answer("❌ Только создатель игры или администратор группы может отменить игру.")
+        if message.chat.type == "private":
+            await message.answer("❌ Только создатель игры может отменить игру.")
+        else:
+            await message.answer("❌ Только создатель игры или администратор группы может отменить игру.")
         return
     
     # Удаляем все сообщения игры
@@ -615,8 +625,12 @@ async def cmd_stop(message: Message):
                 pass
     
     # Уведомляем игроков в личку
-    cancel_text = "⏹ Игра отменена\n\n"
-    cancel_text += f"Игра в группе была отменена {'создателем' if is_creator else 'администратором группы'}."
+    if message.chat.type == "private":
+        cancel_text = "⏹ Игра отменена\n\n"
+        cancel_text += "Игра была отменена создателем."
+    else:
+        cancel_text = "⏹ Игра отменена\n\n"
+        cancel_text += f"Игра в группе была отменена {'создателем' if is_creator else 'администратором группы'}."
     
     if p1:
         try:
@@ -630,20 +644,24 @@ async def cmd_stop(message: Message):
         except:
             pass
     
-    # Удаляем все сообщения бота в группе
-    if game.group_messages:
+    # Удаляем все сообщения бота в группе (если игра была в группе)
+    if game.group_id and game.group_messages:
         for msg_id in game.group_messages:
             try:
-                await bot.delete_message(chat_id=group_id, message_id=msg_id)
+                await bot.delete_message(chat_id=game.group_id, message_id=msg_id)
             except:
                 pass
     
-    # Сообщение в группу
-    user_name = message.from_user.username or message.from_user.first_name or "Пользователь"
-    group_text = f"⏹ Игра отменена\n\n"
-    group_text += f"Игра была отменена {'создателем' if is_creator else 'администратором'} @{user_name}."
-    
-    await message.answer(group_text)
+    # Сообщение в группу (только если это группа)
+    if message.chat.type != "private":
+        user_name = message.from_user.username or message.from_user.first_name or "Пользователь"
+        group_text = f"⏹ Игра отменена\n\n"
+        group_text += f"Игра была отменена {'создателем' if is_creator else 'администратором'} @{user_name}."
+        
+        await message.answer(group_text)
+    else:
+        # В личных сообщениях просто подтверждаем
+        await message.answer("✅ Игра отменена.")
     
     # Удаляем игру
     if game.id in games:
@@ -2031,7 +2049,7 @@ async def cmd_help(message: Message):
         f"• Используйте 🚩 Сдаться для завершения игры\n\n"
         f"📋 Команды:\n"
         f"/play - создать новую игру\n"
-        f"/stop - отменить текущую игру (только в группах)\n"
+        f"/stop - отменить текущую игру\n"
         f"/rules - правила игры\n"
         f"/help - эта справка\n\n"
         f"Используйте /rules для подробных правил игры."
@@ -2068,8 +2086,8 @@ async def cmd_rules(message: Message):
         "🔥 - попадание\n"
         "❌ - уничтожен (красный крест)\n\n"
         "🎮 Режимы игры:\n"
-        "• Обычный (8×8): 2×3, 2×2, 4×1\n"
-        "• Быстрый (6×6): 1×3, 1×2, 2×1"
+        "• Обычный (8×8): 2×3, 2×2, 4×1 (всего 8 кораблей)\n"
+        "• Быстрый (6×6): 1×3, 1×2, 2×1 (всего 4 корабля)"
     )
     await message.answer(text)
 
