@@ -3,7 +3,9 @@ import uuid
 import asyncio
 from datetime import datetime
 from typing import Optional, Literal
+from threading import Thread
 
+from flask import Flask
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, BotCommand
 from aiogram.filters import Command, CommandStart
@@ -24,6 +26,28 @@ from keyboards import (
 )
 
 load_dotenv()
+
+# Flask приложение для веб-сервера (чтобы Render видел его как активный сервис)
+app = Flask(__name__)
+
+@app.route('/')
+def index():
+    """Главная страница - просто возвращает статус"""
+    return {
+        "status": "ok",
+        "service": "Sea Battle Telegram Bot",
+        "message": "Bot is running"
+    }, 200
+
+@app.route('/health')
+def health():
+    """Health check endpoint для Render"""
+    return {"status": "healthy"}, 200
+
+def run_flask():
+    """Запуск Flask сервера в отдельном потоке"""
+    port = int(os.getenv("PORT", 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
@@ -1678,6 +1702,13 @@ async def main():
     
     # Устанавливаем команды бота
     await set_bot_commands()
+    
+    # Запускаем Flask сервер в отдельном потоке (для Render)
+    flask_thread = Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    port = int(os.getenv("PORT", 5000))
+    print(f"Flask сервер запущен на порту {port}")
+    print(f"Health check: http://0.0.0.0:{port}/health")
     
     await dp.start_polling(bot)
 

@@ -5,10 +5,14 @@ services:
     plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: python bot.py
+    healthCheckPath: /health
     envVars:
       - key: BOT_TOKEN
         sync: false
       - key: TELEGRAM_API
         value: https://api.telegram.org
+        required: false
+      - key: PORT
+        value: 10000
         required: false
 
