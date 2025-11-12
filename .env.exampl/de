@@ -1,8 +1,0 @@
-﻿# Telegram Bot Token (РѕР±СЏР·Р°С‚РµР»СЊРЅРѕ)
-# РџРѕР»СѓС‡РёС‚Рµ Сѓ @BotFather РІ Telegram
-BOT_TOKEN=Token
-
-# Telegram Bot API (РѕРїС†РёРѕРЅР°Р»СЊРЅРѕ)
-# РџРѕ СѓРјРѕР»С‡Р°РЅРёСЋ: https://api.telegram.org
-# РСЃРїРѕР»СЊР·СѓР№С‚Рµ РґР»СЏ РїСЂРѕРєСЃРё РёР»Рё РєР°СЃС‚РѕРјРЅРѕРіРѕ СЃРµСЂРІРµСЂР°
-TELEGRAM_API=https://api.telegram.org
