@@ -59,7 +59,8 @@ python bot.py
 3. Создайте новый **Web Service**
 4. Настройки:
    - **Environment**: Python 3
-   - **Build Command**: `pip install -r requirements.txt`
+   - **Python Version**: `3.11` (важно для совместимости)
+   - **Build Command**: `pip install --upgrade pip setuptools wheel && pip install -r requirements.txt`
    - **Start Command**: `python bot.py`
 5. Добавьте переменные окружения:
    - `BOT_TOKEN` - ваш токен бота

@@ -20,11 +20,12 @@ git push origin main
 ### Основные настройки:
 - **Name**: `seabattle-telegram-bot` (или любое другое)
 - **Environment**: `Python 3`
+- **Python Version**: `3.11` (важно! Python 3.13 может вызывать проблемы с компиляцией)
 - **Region**: выберите ближайший к вам
 - **Branch**: `main` (или ваша основная ветка)
 
 ### Build & Deploy:
-- **Build Command**: `pip install -r requirements.txt`
+- **Build Command**: `pip install --upgrade pip setuptools wheel && pip install -r requirements.txt`
 - **Start Command**: `python bot.py`
 
 ### Environment Variables:
