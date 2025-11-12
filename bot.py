@@ -1,0 +1,1687 @@
+import os
+import uuid
+import asyncio
+from datetime import datetime
+from typing import Optional, Literal
+
+from aiogram import Bot, Dispatcher, F
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, BotCommand
+from aiogram.filters import Command, CommandStart
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.storage.memory import MemoryStorage
+from dotenv import load_dotenv
+
+from models import GameState, Player
+from game_logic import (
+    create_empty_board, create_empty_attacks, get_ship_config,
+    validate_ship_placement, place_ship, auto_place_ships,
+    attack_cell, check_game_over, get_remaining_ships
+)
+from keyboards import (
+    get_mode_keyboard, get_join_keyboard, get_setup_keyboard,
+    get_battle_keyboard_enemy, get_battle_keyboard_my, get_game_over_keyboard
+)
+
+load_dotenv()
+
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN не найден в переменных окружения")
+
+# Telegram Bot API (опционально, для прокси или кастомного сервера)
+# Формат: https://api.telegram.org или https://your-proxy-server.com/bot
+TELEGRAM_API = os.getenv("TELEGRAM_API", "https://api.telegram.org")
+
+# Инициализация бота с кастомным API (если указан)
+# В aiogram 3.x base_url должен быть полным URL до /bot
+if TELEGRAM_API != "https://api.telegram.org":
+    # Если указан кастомный API, добавляем /bot если его нет
+    if not TELEGRAM_API.endswith('/bot'):
+        base_url = f"{TELEGRAM_API.rstrip('/')}/bot"
+    else:
+        base_url = TELEGRAM_API
+    bot = Bot(token=BOT_TOKEN, base_url=base_url)
+else:
+    bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher(storage=MemoryStorage())
+
+# Кэш для информации о боте
+_bot_info_cache: Optional[dict] = None
+
+
+async def get_bot_info() -> dict:
+    """Получить информацию о боте (с кэшированием)"""
+    global _bot_info_cache
+    if _bot_info_cache is None:
+        bot_info = await bot.get_me()
+        _bot_info_cache = {
+            'id': bot_info.id,
+            'username': bot_info.username,
+            'first_name': bot_info.first_name,
+            'is_bot': bot_info.is_bot
+        }
+    return _bot_info_cache
+
+
+async def set_bot_commands():
+    """Установить команды бота для меню в Telegram"""
+    commands = [
+        BotCommand(command="start", description="🚀 Начать работу с ботом"),
+        BotCommand(command="play", description="🎮 Создать новую игру"),
+        BotCommand(command="help", description="❓ Помощь и инструкции"),
+        BotCommand(command="rules", description="📖 Правила игры"),
+    ]
+    await bot.set_my_commands(commands)
+    print("Команды бота установлены")
+
+
+# Хранилище игр
+games: dict[str, GameState] = {}
+
+# Состояния для FSM
+class SetupState(StatesGroup):
+    waiting_for_ship = State()
+    placing_ship = State()
+
+
+def get_game_by_user(user_id: int) -> Optional[tuple[str, GameState, str]]:
+    """Найти игру по ID пользователя"""
+    for game_id, game in games.items():
+        if game.players['p1'] and game.players['p1'].user_id == user_id:
+            return (game_id, game, 'p1')
+        if game.players['p2'] and game.players['p2'].user_id == user_id:
+            return (game_id, game, 'p2')
+    return None
+
+
+def format_board_text(board: list[list[str]], size: int) -> str:
+    """Форматировать поле в текст"""
+    letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[:size]
+    text = "   " + " ".join(letters[:size]) + "\n"
+    for i, row in enumerate(board):
+        text += f"{i+1:2} " + " ".join(row) + "\n"
+    return text
+
+
+async def send_setup_message(game: GameState, player_id: str, chat_id: int):
+    """Отправить сообщение с расстановкой кораблей"""
+    player = game.get_player(player_id)
+    if not player:
+        return
+
+    opponent = game.get_opponent(player_id)
+    config = get_ship_config(game.mode)
+    ships = config['ships']
+    placed_ships = len(player.ships)
+
+    # Показываем имя противника, если он есть
+    opponent_info = ""
+    if opponent:
+        opponent_status = "✅ Готов" if opponent.ready else "⚓ Расстановка"
+        opponent_info = f"\n👤 Противник: @{opponent.username} ({opponent_status})"
+
+    if placed_ships < len(ships):
+        # Определяем правильный размер корабля для размещения
+        expected_ships = ships.copy()
+        placed_ships_list = [ship['size'] for ship in player.ships]
+        
+        # Находим первый корабль из ожидаемых, которого еще нет
+        ship_size = None
+        ship_index = 0
+        for i, expected_size in enumerate(expected_ships):
+            placed_count = placed_ships_list.count(expected_size)
+            expected_count = expected_ships.count(expected_size)
+            if placed_count < expected_count:
+                ship_size = expected_size
+                ship_index = i
+                break
+        
+        if ship_size is None:
+            ship_size = ships[placed_ships]
+            ship_index = placed_ships
+        
+        text = f"⚓ Расстановка кораблей{opponent_info}\n\n"
+        text += f"Разместите {ship_size}-палубный корабль ({placed_ships + 1}/{len(ships)})\n"
+        text += f"Используйте кнопки для перемещения и поворота"
+
+        keyboard = get_setup_keyboard(
+            player.board,
+            game.mode,
+            player.current_ship_row,
+            player.current_ship_col,
+            player.current_ship_horizontal,
+            ship_index,
+            show_preview=True
+        )
+    else:
+        player_status = "✅ Вы готовы" if player.ready else "⏳ Ожидание"
+        text = f"✅ Все корабли расставлены!{opponent_info}\n\n"
+        text += f"Статус: {player_status}\n"
+        if not player.ready:
+            text += f"Нажмите 'Готово', когда будете готовы начать бой."
+
+        keyboard = get_setup_keyboard(
+            player.board,
+            game.mode,
+            show_preview=False
+        )
+
+    # Всегда пытаемся обновить существующее сообщение
+    if player.setup_message_id:
+        try:
+            await bot.edit_message_text(
+                text=text,
+                chat_id=chat_id,
+                message_id=player.setup_message_id,
+                reply_markup=keyboard
+            )
+            return  # Успешно обновлено
+        except Exception:
+            # Если не удалось обновить, удаляем старое
+            try:
+                await bot.delete_message(chat_id=chat_id, message_id=player.setup_message_id)
+            except:
+                pass
+            player.setup_message_id = None  # Сбрасываем ID
+    
+    # Если сообщения нет или не удалось обновить, создаем новое
+    try:
+        msg = await bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard)
+        player.setup_message_id = msg.message_id
+    except Exception:
+        pass  # Игнорируем ошибки отправки
+
+
+async def send_battle_message(game: GameState, player_id: str, chat_id: int):
+    """Отправить сообщения с боем (2 сообщения: мое поле и поле врага)"""
+    player = game.get_player(player_id)
+    opponent = game.get_opponent(player_id)
+    if not player or not opponent:
+        return
+    
+    is_my_turn = game.current_player == player_id
+    config = get_ship_config(game.mode)
+    
+    # Эмодзи для хода
+    turn_emoji = "👆" if is_my_turn else "⏰"
+    if is_my_turn:
+        turn_text = f"{turn_emoji} Ваш ход"
+    else:
+        turn_text = f"{turn_emoji} Ожидание хода противника"
+    
+    # Таймер
+    timer_text = ""
+    if game.is_timed and game.last_move_time:
+        elapsed = datetime.now().timestamp() - game.last_move_time
+        remaining = max(0, game.time_limit - int(elapsed))
+        minutes = remaining // 60
+        seconds = remaining % 60
+        timer_text = f"\n⏱ Осталось: {minutes}:{seconds:02d}"
+    
+    # Создаем копию своего поля для отображения атак противника
+    # player.board уже содержит все атаки противника (🔥, ❌, ⚫)
+    display_board = [row[:] for row in player.board]
+    
+    # Сообщение с моим полем (сверху)
+    my_text = f"🎮 Игра с @{opponent.username}\n\n"
+    my_text += f"⏱ Режим: {'с таймером' if game.is_timed else 'без таймера'}{timer_text}\n"
+    my_text += f"{turn_text}\n\n"
+    my_text += f"📍 ВАШЕ ПОЛЕ:"
+    
+    my_keyboard = get_battle_keyboard_my(display_board, game.mode)
+    
+    # Информационное табло (посередине)
+    info_text = "📊 ИНФОРМАЦИОННОЕ ТАБЛО\n\n"
+    if game.last_move_info:
+        info_text += f"Последний ход: {game.last_move_info}\n"
+    else:
+        info_text += "Ожидание первого хода...\n"
+    info_text += f"\n✅ Ваши корабли: {get_remaining_ships(player)}\n"
+    info_text += f"🎯 Корабли противника: {get_remaining_ships(opponent)}"
+    
+    # Сообщение с полем врага (снизу)
+    enemy_text = f"🎯 ПОЛЕ ПРОТИВНИКА:"
+    enemy_keyboard = get_battle_keyboard_enemy(player.attacks, game.mode, is_my_turn)
+    
+    # ВСЕГДА обновляем существующие сообщения, НИКОГДА не создаем новые
+    # Сообщение с моим полем
+    if player.my_board_message_id:
+        try:
+            await bot.edit_message_text(
+                text=my_text,
+                chat_id=chat_id,
+                message_id=player.my_board_message_id,
+                reply_markup=my_keyboard
+            )
+        except Exception:
+            # Если не удалось обновить, просто игнорируем (не создаем новое!)
+            pass
+    else:
+        # Только если сообщения вообще нет, создаем его один раз
+        try:
+            msg = await bot.send_message(chat_id=chat_id, text=my_text, reply_markup=my_keyboard)
+            player.my_board_message_id = msg.message_id
+        except Exception:
+            pass
+    
+    # Информационное табло (посередине)
+    if player.info_message_id:
+        try:
+            await bot.edit_message_text(
+                text=info_text,
+                chat_id=chat_id,
+                message_id=player.info_message_id
+            )
+        except Exception:
+            pass
+    else:
+        # Только если сообщения вообще нет, создаем его один раз
+        try:
+            msg = await bot.send_message(chat_id=chat_id, text=info_text)
+            player.info_message_id = msg.message_id
+        except Exception:
+            pass
+    
+    # Сообщение с полем врага
+    if player.enemy_board_message_id:
+        try:
+            await bot.edit_message_text(
+                text=enemy_text,
+                chat_id=chat_id,
+                message_id=player.enemy_board_message_id,
+                reply_markup=enemy_keyboard
+            )
+        except Exception:
+            # Если не удалось обновить, просто игнорируем (не создаем новое!)
+            pass
+    else:
+        # Только если сообщения вообще нет, создаем его один раз
+        try:
+            msg = await bot.send_message(chat_id=chat_id, text=enemy_text, reply_markup=enemy_keyboard)
+            player.enemy_board_message_id = msg.message_id
+        except Exception:
+            pass
+
+
+async def update_timer_task(game_id: str):
+    """Фоновая задача для обновления таймера (каждые 5 секунд)"""
+    while True:
+        try:
+            await asyncio.sleep(5)  # Обновляем каждые 5 секунд, чтобы не превышать лимиты API
+            
+            if game_id not in games:
+                break
+            
+            game = games[game_id]
+            
+            if not game.is_timed or not game.last_move_time:
+                continue
+            
+            if check_game_over(game):
+                break
+            
+            # Проверяем, не истекло ли время
+            elapsed = datetime.now().timestamp() - game.last_move_time
+            if elapsed >= game.time_limit:
+                # Время истекло - поражение по таймауту
+                if game.current_player:
+                    opponent_id = 'p2' if game.current_player == 'p1' else 'p1'
+                    game.winner = opponent_id
+                    game.surrendered = game.current_player  # Помечаем как сдачу по таймауту
+                    # Завершаем игру
+                    await end_game(game)
+                    break
+            
+            # Обновляем сообщения обоим игрокам через edit_message_text
+            p1 = game.get_player('p1')
+            p2 = game.get_player('p2')
+            if p1 and p2:
+                # Обновляем только текст с таймером, не пересоздаем сообщения
+                try:
+                    await send_battle_message(game, 'p1', p1.user_id)
+                    await send_battle_message(game, 'p2', p2.user_id)
+                except Exception as api_error:
+                    # Обрабатываем Flood control - просто пропускаем обновление
+                    error_str = str(api_error)
+                    if "Flood control" in error_str or "Too Many Requests" in error_str:
+                        # Если превышен лимит, увеличиваем задержку до 10 секунд
+                        await asyncio.sleep(10)
+                        continue
+                    else:
+                        # Другие ошибки логируем, но не прерываем цикл
+                        print(f"Ошибка при обновлении сообщений: {api_error}")
+        except Exception as e:
+            error_str = str(e)
+            if "Flood control" in error_str or "Too Many Requests" in error_str:
+                # При Flood control увеличиваем задержку
+                await asyncio.sleep(10)
+                continue
+            else:
+                print(f"Ошибка в update_timer_task: {e}")
+                # Не прерываем цикл при других ошибках, просто логируем
+                await asyncio.sleep(5)
+
+
+async def start_battle(game: GameState):
+    """Начать бой"""
+    if not game.is_ready_to_start():
+        return
+    
+    # Удаляем старые сообщения расстановки перед началом боя
+    p1 = game.get_player('p1')
+    p2 = game.get_player('p2')
+    if p1 and p1.setup_message_id:
+        try:
+            await bot.delete_message(chat_id=p1.user_id, message_id=p1.setup_message_id)
+        except:
+            pass
+        p1.setup_message_id = None
+    if p2 and p2.setup_message_id:
+        try:
+            await bot.delete_message(chat_id=p2.user_id, message_id=p2.setup_message_id)
+        except:
+            pass
+        p2.setup_message_id = None
+    
+    # Случайно выбираем первого игрока
+    game.current_player = 'p1' if (datetime.now().timestamp() % 2 == 0) else 'p2'
+    
+    # Устанавливаем время начала хода для таймера
+    if game.is_timed:
+        game.last_move_time = datetime.now().timestamp()
+        # Запускаем фоновую задачу для обновления таймера
+        asyncio.create_task(update_timer_task(game.id))
+    
+    # Отправляем сообщения обоим игрокам
+    if p1 and p2:
+        await send_battle_message(game, 'p1', p1.user_id)
+        await send_battle_message(game, 'p2', p2.user_id)
+
+
+@dp.message(Command("play"))
+async def cmd_play(message: Message):
+    """Команда /play - создать игру"""
+    # Проверяем, не участвует ли пользователь уже в игре
+    existing = get_game_by_user(message.from_user.id)
+    if existing:
+        await message.answer("Вы уже участвуете в игре! Завершите текущую игру.")
+        return
+    
+    game_id = str(uuid.uuid4())[:8]
+    config = get_ship_config('classic')  # По умолчанию
+    
+    # Сохраняем group_id только если это группа
+    group_id = message.chat.id if message.chat.type != "private" else None
+    
+    game = GameState(
+        id=game_id,
+        mode='classic',
+        is_timed=False,
+        group_id=group_id
+    )
+    
+    # Используем данные пользователя из Telegram
+    user = message.from_user
+    p1 = Player(
+        user_id=user.id,
+        username=user.username or user.first_name or f"user_{user.id}",
+        board=create_empty_board(config['size']),
+        attacks=create_empty_attacks(config['size'])
+    )
+    
+    game.players['p1'] = p1
+    games[game_id] = game
+    
+    if message.chat.type == "private":
+        text = f"🎮 Новая игра создана!\n\n"
+        text += f"Создатель: @{p1.username}\n"
+        text += f"ID игры: {game_id}\n\n"
+        text += f"Выберите режим игры. После настройки вы получите ссылку для приглашения друга."
+    else:
+        text = f"🎮 Новая игра создана!\n\n"
+        text += f"Создатель: @{p1.username}\n"
+        text += f"ID игры: {game_id}\n\n"
+        text += f"Режим: Обычный (8×8) или Быстрый (6×6)\n"
+        text += f"Выберите режим:"
+    
+    msg = await message.answer(text, reply_markup=get_mode_keyboard())
+    game.setup_message_id = msg.message_id
+
+
+@dp.callback_query(F.data.startswith("mode_"))
+async def callback_mode(callback: CallbackQuery):
+    """Обработка выбора режима"""
+    mode = callback.data.split("_")[1]  # classic или fast
+    
+    # Находим игру
+    existing = get_game_by_user(callback.from_user.id)
+    if not existing:
+        await callback.answer("Игра не найдена", show_alert=True)
+        return
+    
+    game_id, game, player_id = existing
+    if player_id != 'p1':
+        await callback.answer("Только создатель игры может выбрать режим", show_alert=True)
+        return
+    
+    game.mode = mode
+    config = get_ship_config(mode)
+    
+    # Обновляем поля
+    p1 = game.get_player('p1')
+    if p1:
+        p1.board = create_empty_board(config['size'])
+        p1.attacks = create_empty_attacks(config['size'])
+    
+    await callback.answer(f"Режим: {'Обычный' if mode == 'classic' else 'Быстрый'}")
+    
+    # Если это реванш, показываем выбор таймера после выбора режима
+    if game.rematch_opponent_id:
+        # Показываем выбор таймера для реванша
+        text = f"⚔️ Реванш!\n\n"
+        text += f"Режим: {'Обычный (8×8)' if mode == 'classic' else 'Быстрый (6×6)'}\n"
+        text += f"Выберите таймер:"
+        
+        # Обновляем существующее сообщение
+        try:
+            await callback.message.edit_text(text, reply_markup=get_mode_keyboard())
+        except Exception:
+            # Если не удалось обновить, удаляем старое и создаем новое
+            try:
+                await callback.message.delete()
+            except:
+                pass
+            msg = await callback.message.answer(text, reply_markup=get_mode_keyboard())
+            if game.setup_message_id:
+                try:
+                    await bot.delete_message(chat_id=callback.from_user.id, message_id=game.setup_message_id)
+                except:
+                    pass
+            game.setup_message_id = msg.message_id
+        return
+    
+    # Показываем выбор таймера
+    text = f"🎮 Игра создана!\n\n"
+    text += f"Режим: {'Обычный (8×8)' if mode == 'classic' else 'Быстрый (6×6)'}\n"
+    text += f"Выберите таймер:"
+    
+    # Обновляем существующее сообщение
+    try:
+        await callback.message.edit_text(text, reply_markup=get_mode_keyboard())
+    except Exception:
+        # Если не удалось обновить, удаляем старое и создаем новое
+        try:
+            await callback.message.delete()
+        except:
+            pass
+        msg = await callback.message.answer(text, reply_markup=get_mode_keyboard())
+        # Сохраняем ID сообщения для будущих обновлений
+        if game.setup_message_id:
+            try:
+                await bot.delete_message(chat_id=callback.from_user.id, message_id=game.setup_message_id)
+            except:
+                pass
+        game.setup_message_id = msg.message_id
+
+
+@dp.callback_query(F.data.startswith("timer_"))
+async def callback_timer(callback: CallbackQuery):
+    """Обработка выбора таймера"""
+    timer_choice = callback.data.split("_")[1]  # yes или no
+    
+    existing = get_game_by_user(callback.from_user.id)
+    if not existing:
+        await callback.answer("Игра не найдена", show_alert=True)
+        return
+    
+    game_id, game, player_id = existing
+    if player_id != 'p1':
+        await callback.answer("Только создатель игры может выбрать таймер", show_alert=True)
+        return
+    
+    game.is_timed = (timer_choice == "yes")
+    if game.is_timed:
+        # Устанавливаем таймер в зависимости от режима
+        if game.mode == 'fast':
+            game.time_limit = 60  # 1 минута на ход для быстрого режима
+        else:
+            game.time_limit = 120  # 2 минуты на ход для обычного режима
+    
+    await callback.answer(f"Таймер: {'включен' if game.is_timed else 'выключен'}")
+    
+    # Если это реванш, отправляем приглашение противнику
+    if game.rematch_opponent_id:
+        bot_info = await get_bot_info()
+        user = callback.from_user
+        user_display_name = user.username or user.first_name or 'Игрок'
+        text = f"⚔️ Реванш!\n\n"
+        text += f"@{user_display_name} предлагает реванш!\n\n"
+        text += f"Режим: {'Обычный (8×8)' if game.mode == 'classic' else 'Быстрый (6×6)'}\n"
+        text += f"Таймер: {'включен' if game.is_timed else 'выключен'}\n\n"
+        text += f"Присоединяйтесь:"
+        
+        try:
+            await bot.send_message(
+                chat_id=game.rematch_opponent_id,
+                text=text,
+                reply_markup=get_join_keyboard(game_id, bot_info['username'])
+            )
+            # Обновляем существующее сообщение
+            try:
+                await callback.message.edit_text(
+                    f"🎮 Реванш создан!\n\n"
+                    f"Режим: {'Обычный (8×8)' if game.mode == 'classic' else 'Быстрый (6×6)'}\n"
+                    f"Таймер: {'включен' if game.is_timed else 'выключен'}\n\n"
+                    f"Приглашение отправлено противнику!"
+                )
+            except Exception:
+                # Если не удалось обновить, удаляем старое и создаем новое
+                try:
+                    await callback.message.delete()
+                except:
+                    pass
+                msg = await callback.message.answer(
+                    f"🎮 Реванш создан!\n\n"
+                    f"Режим: {'Обычный (8×8)' if game.mode == 'classic' else 'Быстрый (6×6)'}\n"
+                    f"Таймер: {'включен' if game.is_timed else 'выключен'}\n\n"
+                    f"Приглашение отправлено противнику!"
+                )
+                if game.setup_message_id:
+                    try:
+                        await bot.delete_message(chat_id=callback.from_user.id, message_id=game.setup_message_id)
+                    except:
+                        pass
+                game.setup_message_id = msg.message_id
+            game.rematch_opponent_id = None  # Очищаем после использования
+        except Exception as e:
+            await callback.message.edit_text(
+                f"❌ Не удалось отправить приглашение: {str(e)}\n\n"
+                f"Выберите таймер:"
+            )
+        return
+    
+    # Отправляем ссылку для присоединения
+    bot_info = await get_bot_info()
+    is_private = callback.message.chat.type == "private"
+    
+    text = f"🎮 Игра готова!\n\n"
+    text += f"Режим: {'Обычный (8×8)' if game.mode == 'classic' else 'Быстрый (6×6)'}\n"
+    text += f"Таймер: {'включен' if game.is_timed else 'выключен'}\n\n"
+    
+    if is_private:
+        text += f"📤 Отправьте ссылку другу или в группу для присоединения:"
+    else:
+        text += f"Пригласите друга по ссылке ниже:"
+    
+    # Обновляем существующее сообщение
+    try:
+        await callback.message.edit_text(
+            text, 
+            reply_markup=get_join_keyboard(game_id, bot_info['username'], show_share=is_private)
+        )
+    except Exception:
+        # Если не удалось обновить, удаляем старое и создаем новое
+        try:
+            await callback.message.delete()
+        except:
+            pass
+        msg = await callback.message.answer(
+            text, 
+            reply_markup=get_join_keyboard(game_id, bot_info['username'], show_share=is_private)
+        )
+        if game.setup_message_id:
+            try:
+                await bot.delete_message(chat_id=callback.from_user.id, message_id=game.setup_message_id)
+            except:
+                pass
+        game.setup_message_id = msg.message_id
+
+
+@dp.message(CommandStart())
+async def cmd_start(message: Message, command: CommandStart):
+    """Обработка /start с параметрами"""
+    args = command.args
+    
+    if args and args.startswith("join_"):
+        game_id = args.split("_")[1]
+        
+        if game_id not in games:
+            await message.answer("Игра не найдена или уже началась")
+            return
+        
+        game = games[game_id]
+        
+        if game.players['p2'] is not None:
+            await message.answer("В игре уже есть второй игрок")
+            return
+        
+        if game.players['p1'] and game.players['p1'].user_id == message.from_user.id:
+            await message.answer("Вы уже создатель этой игры")
+            return
+        
+        # Добавляем второго игрока (используем данные из Telegram)
+        config = get_ship_config(game.mode)
+        user = message.from_user
+        p2 = Player(
+            user_id=user.id,
+            username=user.username or user.first_name or f"user_{user.id}",
+            board=create_empty_board(config['size']),
+            attacks=create_empty_attacks(config['size'])
+        )
+        
+        game.players['p2'] = p2
+        
+        # Отправляем сообщения обоим игрокам для расстановки
+        p1 = game.get_player('p1')
+        if p1:
+            await send_setup_message(game, 'p1', p1.user_id)
+        await send_setup_message(game, 'p2', p2.user_id)
+    else:
+        bot_info = await get_bot_info()
+        await message.answer(
+            f"🎮 Добро пожаловать в Морской бой!\n\n"
+            f"Я @{bot_info['username']}, бот для игры в Морской бой.\n\n"
+            f"📋 Доступные команды:\n"
+            f"/play - создать новую игру\n"
+            f"/help - помощь и инструкции\n"
+            f"/rules - правила игры\n\n"
+            f"Используйте /play, чтобы создать игру. Вы сможете отправить ссылку другу или в группу для присоединения."
+        )
+
+
+@dp.callback_query(F.data == "auto_place")
+async def callback_auto_place(callback: CallbackQuery):
+    """Автоматическая расстановка кораблей"""
+    existing = get_game_by_user(callback.from_user.id)
+    if not existing:
+        await callback.answer("Игра не найдена", show_alert=True)
+        return
+    
+    game_id, game, player_id = existing
+    player = game.get_player(player_id)
+    if not player:
+        await callback.answer("Ошибка", show_alert=True)
+        return
+    
+    # Автоматическая расстановка
+    board, ships = auto_place_ships(game.mode)
+    player.board = board
+    player.ships = ships
+    
+    # Сбрасываем позицию для редактирования
+    player.current_ship_row = 0
+    player.current_ship_col = 0
+    player.current_ship_horizontal = True
+    
+    await callback.answer("Корабли расставлены автоматически! Вы можете изменить расстановку.")
+    await send_setup_message(game, player_id, callback.from_user.id)
+
+
+@dp.callback_query(F.data == "move_left")
+async def callback_move_left(callback: CallbackQuery):
+    """Переместить корабль влево"""
+    await callback.answer()  # Отвечаем сразу
+    
+    existing = get_game_by_user(callback.from_user.id)
+    if not existing:
+        return
+    
+    game_id, game, player_id = existing
+    player = game.get_player(player_id)
+    if not player:
+        return
+    
+    config = get_ship_config(game.mode)
+    size = config['size']
+    ships = config['ships']
+    placed_ships = len(player.ships)
+    
+    if placed_ships >= len(ships):
+        return
+    
+    # Определяем правильный размер корабля
+    expected_ships = ships.copy()
+    placed_ships_list = [ship['size'] for ship in player.ships]
+    ship_size = None
+    for expected_size in expected_ships:
+        placed_count = placed_ships_list.count(expected_size)
+        expected_count = expected_ships.count(expected_size)
+        if placed_count < expected_count:
+            ship_size = expected_size
+            break
+    
+    if ship_size is None:
+        return
+    
+    # Сохраняем старую позицию
+    old_col = player.current_ship_col
+    
+    # Пытаемся переместить
+    if player.current_ship_col > 0:
+        player.current_ship_col -= 1
+    
+    # Обновляем сообщение только если позиция изменилась
+    if old_col != player.current_ship_col:
+        await send_setup_message(game, player_id, callback.from_user.id)
+
+
+@dp.callback_query(F.data == "move_right")
+async def callback_move_right(callback: CallbackQuery):
+    """Переместить корабль вправо"""
+    await callback.answer()  # Отвечаем сразу
+    
+    existing = get_game_by_user(callback.from_user.id)
+    if not existing:
+        return
+    
+    game_id, game, player_id = existing
+    player = game.get_player(player_id)
+    if not player:
+        return
+    
+    config = get_ship_config(game.mode)
+    size = config['size']
+    ships = config['ships']
+    placed_ships = len(player.ships)
+    
+    if placed_ships >= len(ships):
+        return
+    
+    # Определяем правильный размер корабля
+    expected_ships = ships.copy()
+    placed_ships_list = [ship['size'] for ship in player.ships]
+    ship_size = None
+    for expected_size in expected_ships:
+        placed_count = placed_ships_list.count(expected_size)
+        expected_count = expected_ships.count(expected_size)
+        if placed_count < expected_count:
+            ship_size = expected_size
+            break
+    
+    if ship_size is None:
+        return
+    
+    # Сохраняем старую позицию
+    old_col = player.current_ship_col
+    
+    # Пытаемся переместить
+    max_col = size - ship_size if player.current_ship_horizontal else size - 1
+    if player.current_ship_col < max_col:
+        player.current_ship_col += 1
+    
+    # Обновляем сообщение только если позиция изменилась
+    if old_col != player.current_ship_col:
+        await send_setup_message(game, player_id, callback.from_user.id)
+
+
+@dp.callback_query(F.data == "move_up")
+async def callback_move_up(callback: CallbackQuery):
+    """Переместить корабль вверх"""
+    await callback.answer()  # Отвечаем сразу
+    
+    existing = get_game_by_user(callback.from_user.id)
+    if not existing:
+        return
+    
+    game_id, game, player_id = existing
+    player = game.get_player(player_id)
+    if not player:
+        return
+    
+    config = get_ship_config(game.mode)
+    ships = config['ships']
+    placed_ships = len(player.ships)
+    
+    if placed_ships >= len(ships):
+        return
+    
+    # Сохраняем старую позицию
+    old_row = player.current_ship_row
+    
+    # Пытаемся переместить
+    if player.current_ship_row > 0:
+        player.current_ship_row -= 1
+    
+    # Обновляем сообщение только если позиция изменилась
+    if old_row != player.current_ship_row:
+        await send_setup_message(game, player_id, callback.from_user.id)
+
+
+@dp.callback_query(F.data == "move_down")
+async def callback_move_down(callback: CallbackQuery):
+    """Переместить корабль вниз"""
+    await callback.answer()  # Отвечаем сразу
+    
+    existing = get_game_by_user(callback.from_user.id)
+    if not existing:
+        return
+    
+    game_id, game, player_id = existing
+    player = game.get_player(player_id)
+    if not player:
+        return
+    
+    config = get_ship_config(game.mode)
+    size = config['size']
+    ships = config['ships']
+    placed_ships = len(player.ships)
+    
+    if placed_ships >= len(ships):
+        return
+    
+    # Определяем правильный размер корабля
+    expected_ships = ships.copy()
+    placed_ships_list = [ship['size'] for ship in player.ships]
+    ship_size = None
+    for expected_size in expected_ships:
+        placed_count = placed_ships_list.count(expected_size)
+        expected_count = expected_ships.count(expected_size)
+        if placed_count < expected_count:
+            ship_size = expected_size
+            break
+    
+    if ship_size is None:
+        return
+    
+    # Сохраняем старую позицию
+    old_row = player.current_ship_row
+    
+    # Пытаемся переместить
+    max_row = size - 1 if player.current_ship_horizontal else size - ship_size
+    if player.current_ship_row < max_row:
+        player.current_ship_row += 1
+    
+    # Обновляем сообщение только если позиция изменилась
+    if old_row != player.current_ship_row:
+        await send_setup_message(game, player_id, callback.from_user.id)
+
+
+@dp.callback_query(F.data == "rotate")
+async def callback_rotate(callback: CallbackQuery):
+    """Повернуть корабль"""
+    await callback.answer()  # Отвечаем сразу
+    
+    existing = get_game_by_user(callback.from_user.id)
+    if not existing:
+        return
+    
+    game_id, game, player_id = existing
+    player = game.get_player(player_id)
+    if not player:
+        return
+    
+    config = get_ship_config(game.mode)
+    size = config['size']
+    ships = config['ships']
+    placed_ships = len(player.ships)
+    
+    if placed_ships >= len(ships):
+        return
+    
+    # Определяем правильный размер корабля
+    expected_ships = ships.copy()
+    placed_ships_list = [ship['size'] for ship in player.ships]
+    ship_size = None
+    for expected_size in expected_ships:
+        placed_count = placed_ships_list.count(expected_size)
+        expected_count = expected_ships.count(expected_size)
+        if placed_count < expected_count:
+            ship_size = expected_size
+            break
+    
+    if ship_size is None:
+        return
+    
+    # Сохраняем старые значения
+    old_horizontal = player.current_ship_horizontal
+    old_row = player.current_ship_row
+    old_col = player.current_ship_col
+    
+    # Поворачиваем
+    player.current_ship_horizontal = not player.current_ship_horizontal
+    
+    # Проверяем границы после поворота и корректируем позицию
+    if player.current_ship_horizontal:
+        if player.current_ship_col + ship_size > size:
+            player.current_ship_col = max(0, size - ship_size)
+    else:
+        if player.current_ship_row + ship_size > size:
+            player.current_ship_row = max(0, size - ship_size)
+    
+    # Обновляем сообщение только если что-то изменилось
+    if (old_horizontal != player.current_ship_horizontal or 
+        old_row != player.current_ship_row or 
+        old_col != player.current_ship_col):
+        await send_setup_message(game, player_id, callback.from_user.id)
+
+
+@dp.callback_query(F.data == "place_ship")
+async def callback_place_ship(callback: CallbackQuery):
+    """Установить корабль"""
+    existing = get_game_by_user(callback.from_user.id)
+    if not existing:
+        await callback.answer("Игра не найдена", show_alert=True)
+        return
+    
+    game_id, game, player_id = existing
+    player = game.get_player(player_id)
+    if not player:
+        return
+    
+    config = get_ship_config(game.mode)
+    size = config['size']
+    ships = config['ships']
+    placed_ships = len(player.ships)
+    
+    if placed_ships >= len(ships):
+        await callback.answer("Все корабли уже расставлены")
+        return
+    
+    # Определяем правильный размер корабля
+    expected_ships = ships.copy()
+    placed_ships_list = [ship['size'] for ship in player.ships]
+    ship_size = None
+    for expected_size in expected_ships:
+        placed_count = placed_ships_list.count(expected_size)
+        expected_count = expected_ships.count(expected_size)
+        if placed_count < expected_count:
+            ship_size = expected_size
+            break
+    
+    if ship_size is None:
+        await callback.answer("Все корабли уже расставлены")
+        return
+    
+    # Проверяем валидность размещения
+    if not validate_ship_placement(
+        player.board,
+        size,
+        player.current_ship_row,
+        player.current_ship_col,
+        ship_size,
+        player.current_ship_horizontal
+    ):
+        await callback.answer("❌ Корабль слишком близко к другому! Минимум 1 клетка дистанция.", show_alert=True)
+        return
+    
+    # Размещаем корабль
+    cells = place_ship(
+        player.board,
+        player.current_ship_row,
+        player.current_ship_col,
+        ship_size,
+        player.current_ship_horizontal
+    )
+    
+    player.ships.append({
+        'size': ship_size,
+        'cells': cells,
+        'destroyed': False
+    })
+    
+    # Сбрасываем позицию для следующего корабля
+    player.current_ship_row = 0
+    player.current_ship_col = 0
+    player.current_ship_horizontal = True
+    
+    # Сначала отвечаем на callback, потом обновляем сообщение
+    await callback.answer("✅ Корабль установлен!")
+    await send_setup_message(game, player_id, callback.from_user.id)
+
+
+@dp.callback_query(F.data == "edit_placement")
+async def callback_edit_placement(callback: CallbackQuery):
+    """Режим редактирования расстановки"""
+    existing = get_game_by_user(callback.from_user.id)
+    if not existing:
+        await callback.answer("Игра не найдена", show_alert=True)
+        return
+    
+    game_id, game, player_id = existing
+    player = game.get_player(player_id)
+    if not player:
+        await callback.answer("Ошибка", show_alert=True)
+        return
+    
+    config = get_ship_config(game.mode)
+    ships = config['ships']
+    
+    # Если все корабли расставлены, начинаем редактирование с первого
+    if len(player.ships) >= len(ships):
+        # Очищаем поле и корабли для ручной расстановки
+        player.board = create_empty_board(config['size'])
+        player.ships = []
+        player.current_ship_row = 0
+        player.current_ship_col = 0
+        player.current_ship_horizontal = True
+        await callback.answer("Режим редактирования. Начните расстановку заново.")
+    else:
+        await callback.answer("Продолжайте расстановку кораблей")
+    
+    await send_setup_message(game, player_id, callback.from_user.id)
+
+
+@dp.callback_query(F.data.startswith("setup_cell_"))
+async def callback_setup_cell(callback: CallbackQuery):
+    """Обработка клика по клетке при расстановке (для размещения или удаления корабля)"""
+    # Отвечаем сразу, чтобы избежать ошибки "query is too old"
+    await callback.answer()
+    
+    existing = get_game_by_user(callback.from_user.id)
+    if not existing:
+        return
+    
+    game_id, game, player_id = existing
+    player = game.get_player(player_id)
+    if not player:
+        return
+    
+    # Парсим координаты
+    parts = callback.data.split("_")
+    row, col = int(parts[2]), int(parts[3])
+    
+    config = get_ship_config(game.mode)
+    size = config['size']
+    ships = config['ships']
+    placed_ships = len(player.ships)
+    
+    # Проверяем, есть ли корабль в этой клетке (для удаления)
+    ship_to_remove = None
+    for ship in player.ships:
+        if (row, col) in ship['cells']:
+            ship_to_remove = ship
+            break
+    
+    if ship_to_remove:
+        # Удаляем корабль
+        for r, c in ship_to_remove['cells']:
+            if 0 <= r < size and 0 <= c < size:
+                player.board[r][c] = '🌊'
+        player.ships.remove(ship_to_remove)
+        await send_setup_message(game, player_id, callback.from_user.id)
+        return  # Не пытаемся разместить новый корабль после удаления
+    
+    # Размещаем новый корабль только если нет корабля в этой клетке
+    # Определяем, какой корабль нужно разместить, учитывая уже размещенные
+    if placed_ships < len(ships):
+        # Создаем список ожидаемых кораблей (из конфига) и список размещенных
+        expected_ships = ships.copy()  # Копируем список ожидаемых кораблей
+        placed_ships_list = [ship['size'] for ship in player.ships]  # Список размещенных размеров
+        
+        # Находим первый корабль из ожидаемых, которого еще нет в размещенных
+        # Проходим по списку ожидаемых кораблей и ищем первый, которого не хватает
+        ship_size = None
+        for expected_size in expected_ships:
+            # Считаем, сколько таких кораблей уже размещено
+            placed_count = placed_ships_list.count(expected_size)
+            # Считаем, сколько таких кораблей должно быть
+            expected_count = expected_ships.count(expected_size)
+            # Если не хватает, берем этот размер
+            if placed_count < expected_count:
+                ship_size = expected_size
+                break
+        
+        if ship_size is None:
+            # Все корабли размещены
+            await send_setup_message(game, player_id, callback.from_user.id)
+            return
+        
+        # При клике на клетку - показываем предпросмотр корабля на этой позиции
+        # Используем текущую ориентацию игрока
+        # Пробуем разместить с учетом текущей ориентации
+        placed = False
+        # Сначала пробуем с текущей ориентацией
+        orientation = player.current_ship_horizontal
+        if orientation:
+            # Горизонтально: проверяем влево и вправо от кликнутой клетки
+            for start_col in range(max(0, col - ship_size + 1), min(size - ship_size + 1, col + 1)):
+                if validate_ship_placement(player.board, size, row, start_col, ship_size, True):
+                    # Устанавливаем позицию для предпросмотра
+                    player.current_ship_row = row
+                    player.current_ship_col = start_col
+                    player.current_ship_horizontal = True
+                    placed = True
+                    break
+        else:
+            # Вертикально: проверяем вверх и вниз от кликнутой клетки
+            for start_row in range(max(0, row - ship_size + 1), min(size - ship_size + 1, row + 1)):
+                if validate_ship_placement(player.board, size, start_row, col, ship_size, False):
+                    # Устанавливаем позицию для предпросмотра
+                    player.current_ship_row = start_row
+                    player.current_ship_col = col
+                    player.current_ship_horizontal = False
+                    placed = True
+                    break
+        
+        # Если не удалось разместить с текущей ориентацией, пробуем другую
+        if not placed:
+            orientation = not player.current_ship_horizontal
+            if orientation:
+                # Горизонтально: проверяем влево и вправо
+                for start_col in range(max(0, col - ship_size + 1), min(size - ship_size + 1, col + 1)):
+                    if validate_ship_placement(player.board, size, row, start_col, ship_size, True):
+                        # Устанавливаем позицию для предпросмотра
+                        player.current_ship_row = row
+                        player.current_ship_col = start_col
+                        player.current_ship_horizontal = True
+                        placed = True
+                        break
+            else:
+                # Вертикально: проверяем вверх и вниз
+                for start_row in range(max(0, row - ship_size + 1), min(size - ship_size + 1, row + 1)):
+                    if validate_ship_placement(player.board, size, start_row, col, ship_size, False):
+                        # Устанавливаем позицию для предпросмотра
+                        player.current_ship_row = start_row
+                        player.current_ship_col = col
+                        player.current_ship_horizontal = False
+                        placed = True
+                        break
+        
+        if placed:
+            # Показываем предпросмотр (синие квадраты)
+            await send_setup_message(game, player_id, callback.from_user.id)
+        else:
+            # Не удалось разместить - показываем красные квадраты и уведомление
+            # Показываем предпросмотр с красными квадратами на всех возможных позициях
+            # Устанавливаем позицию на кликнутую клетку для показа ошибки
+            player.current_ship_row = row
+            player.current_ship_col = col
+            await callback.answer("❌ Нельзя разместить здесь! Минимум 1 клетка дистанция между кораблями.", show_alert=True)
+            await send_setup_message(game, player_id, callback.from_user.id)
+
+
+@dp.callback_query(F.data == "ready")
+async def callback_ready(callback: CallbackQuery):
+    """Игрок готов начать"""
+    existing = get_game_by_user(callback.from_user.id)
+    if not existing:
+        await callback.answer("Игра не найдена", show_alert=True)
+        return
+    
+    game_id, game, player_id = existing
+    player = game.get_player(player_id)
+    if not player:
+        await callback.answer("Ошибка", show_alert=True)
+        return
+    
+    config = get_ship_config(game.mode)
+    expected_ships = config['ships']
+    
+    # Проверяем правильное количество кораблей по размерам
+    ship_counts = {}
+    for ship in player.ships:
+        size = ship['size']
+        ship_counts[size] = ship_counts.get(size, 0) + 1
+    
+    # Считаем ожидаемое количество по размерам
+    expected_counts = {}
+    for size in expected_ships:
+        expected_counts[size] = expected_counts.get(size, 0) + 1
+    
+    # Проверяем соответствие
+    if len(player.ships) != len(expected_ships):
+        await callback.answer(f"Расставьте все корабли! ({len(player.ships)}/{len(expected_ships)})", show_alert=True)
+        return
+    
+    # Проверяем правильное распределение по размерам
+    for size, expected_count in expected_counts.items():
+        actual_count = ship_counts.get(size, 0)
+        if actual_count != expected_count:
+            await callback.answer(
+                f"Неверное количество кораблей размера {size}! Ожидается {expected_count}, расставлено {actual_count}",
+                show_alert=True
+            )
+            return
+    
+    player.ready = True
+    await callback.answer("✅ Вы готовы!")
+    
+    # Обновляем сообщения обоим игрокам для отображения статусов
+    p1 = game.get_player('p1')
+    p2 = game.get_player('p2')
+    if p1:
+        await send_setup_message(game, 'p1', p1.user_id)
+    if p2:
+        await send_setup_message(game, 'p2', p2.user_id)
+    
+    # Проверяем, готовы ли оба игрока
+    if game.is_ready_to_start():
+        await start_battle(game)
+
+
+@dp.callback_query(F.data.startswith("attack_"))
+async def callback_attack(callback: CallbackQuery):
+    """Обработка атаки"""
+    existing = get_game_by_user(callback.from_user.id)
+    if not existing:
+        await callback.answer("Игра не найдена", show_alert=True)
+        return
+    
+    game_id, game, player_id = existing
+    
+    if game.current_player != player_id:
+        await callback.answer("Не ваш ход!", show_alert=True)
+        return
+    
+    if check_game_over(game):
+        await callback.answer("Игра уже закончена", show_alert=True)
+        return
+    
+    # Парсим координаты
+    parts = callback.data.split("_")
+    row, col = int(parts[1]), int(parts[2])
+    
+    # Атакуем
+    result = attack_cell(game, player_id, row, col)
+    
+    if 'error' in result:
+        await callback.answer(result['error'], show_alert=True)
+        return
+    
+    opponent_id = 'p2' if player_id == 'p1' else 'p1'
+    opponent = game.get_opponent(player_id)
+    player = game.get_player(player_id)
+    
+    if not opponent or not player:
+        return
+    
+    # Обновляем время последнего хода для таймера
+    if game.is_timed:
+        game.last_move_time = datetime.now().timestamp()
+    
+    # Сохраняем информацию о последнем ходе
+    if result['hit']:
+        if result.get('destroyed'):
+            game.last_move_info = "💣 Уничтожен корабль!"
+            await callback.answer("💣 Уничтожен!", show_alert=False)
+        else:
+            game.last_move_info = "💥 Попадание!"
+            await callback.answer("💥 Попадание!", show_alert=False)
+    else:
+        game.last_move_info = "⚫ Мимо!"
+        await callback.answer("⚫ Мимо!", show_alert=False)
+        # Меняем ход
+        game.current_player = opponent_id
+        if game.is_timed:
+            game.last_move_time = datetime.now().timestamp()
+    
+    # Обновляем сообщения параллельно (всегда заменяем старые)
+    await asyncio.gather(
+        send_battle_message(game, player_id, player.user_id),
+        send_battle_message(game, opponent_id, opponent.user_id)
+    )
+    
+    # Проверяем окончание игры
+    if check_game_over(game):
+        await end_game(game)
+
+
+async def end_game(game: GameState):
+    """Завершить игру"""
+    if not game.winner:
+        return
+    
+    winner = game.get_player(game.winner)
+    loser = game.get_opponent(game.winner)
+    
+    if not winner or not loser:
+        return
+    
+    config = get_ship_config(game.mode)
+    size = config['size']
+    
+    # Сообщение победителю
+    if game.surrendered:
+        winner_text = f"🎉 Вы победили! (Противник сдался)\n\n"
+    else:
+        winner_text = f"🎉 Вы победили!\n\n"
+    winner_text += f"Противник: @{loser.username}\n"
+    winner_text += f"Режим: {'Обычный' if game.mode == 'classic' else 'Быстрый'}\n\n"
+    winner_text += "Ваше поле:\n"
+    winner_text += format_board_text(winner.board, size)
+    winner_text += "\nПоле противника (раскрыто):\n"
+    # Показываем все корабли противника
+    revealed_board = [row[:] for row in loser.board]
+    for r in range(size):
+        for c in range(size):
+            if revealed_board[r][c] == '🟥':
+                revealed_board[r][c] = '🟥'  # Корабль
+            elif revealed_board[r][c] in ['🔥', '❌']:
+                revealed_board[r][c] = revealed_board[r][c]  # Уже атаковано
+    winner_text += format_board_text(revealed_board, size)
+    
+    # Сообщение проигравшему
+    if game.surrendered:
+        loser_text = f"🚩 Вы сдались\n\n"
+    else:
+        loser_text = f"😔 Вы проиграли\n\n"
+    loser_text += f"Победитель: @{winner.username}\n"
+    loser_text += f"Режим: {'Обычный' if game.mode == 'classic' else 'Быстрый'}\n\n"
+    loser_text += "Ваше поле:\n"
+    loser_text += format_board_text(loser.board, size)
+    loser_text += "\nПоле противника (раскрыто):\n"
+    # Показываем все корабли противника
+    revealed_winner_board = [row[:] for row in winner.board]
+    for r in range(size):
+        for c in range(size):
+            if revealed_winner_board[r][c] == '🟥':
+                revealed_winner_board[r][c] = '🟥'  # Корабль
+            elif revealed_winner_board[r][c] in ['🔥', '❌', '⚫']:
+                revealed_winner_board[r][c] = revealed_winner_board[r][c]  # Уже атаковано
+    loser_text += format_board_text(revealed_winner_board, size)
+    
+    # Удаляем старые сообщения боя перед отправкой финальных
+    p1 = game.get_player('p1')
+    p2 = game.get_player('p2')
+    if p1:
+        if p1.my_board_message_id:
+            try:
+                await bot.delete_message(chat_id=p1.user_id, message_id=p1.my_board_message_id)
+            except:
+                pass
+        if p1.info_message_id:
+            try:
+                await bot.delete_message(chat_id=p1.user_id, message_id=p1.info_message_id)
+            except:
+                pass
+        if p1.enemy_board_message_id:
+            try:
+                await bot.delete_message(chat_id=p1.user_id, message_id=p1.enemy_board_message_id)
+            except:
+                pass
+    if p2:
+        if p2.my_board_message_id:
+            try:
+                await bot.delete_message(chat_id=p2.user_id, message_id=p2.my_board_message_id)
+            except:
+                pass
+        if p2.info_message_id:
+            try:
+                await bot.delete_message(chat_id=p2.user_id, message_id=p2.info_message_id)
+            except:
+                pass
+        if p2.enemy_board_message_id:
+            try:
+                await bot.delete_message(chat_id=p2.user_id, message_id=p2.enemy_board_message_id)
+            except:
+                pass
+    
+    # Клавиатуры
+    winner_kb = get_game_over_keyboard(loser.user_id, game.id)
+    loser_kb = get_game_over_keyboard(winner.user_id, game.id)
+    
+    # Отправляем финальные сообщения
+    await bot.send_message(chat_id=winner.user_id, text=winner_text, reply_markup=winner_kb)
+    await bot.send_message(chat_id=loser.user_id, text=loser_text, reply_markup=loser_kb)
+    
+    # Сообщение в группу, если игра была создана там
+    if game.group_id:
+        group_text = f"🏆 Победил @{winner.username}!\n"
+        group_text += f"Режим: {'Обычный' if game.mode == 'classic' else 'Быстрый'}"
+        try:
+            await bot.send_message(chat_id=game.group_id, text=group_text)
+        except:
+            pass
+    
+    # Удаляем игру
+    if game.id in games:
+        del games[game.id]
+
+
+@dp.callback_query(F.data == "surrender")
+async def callback_surrender(callback: CallbackQuery):
+    """Сдача"""
+    existing = get_game_by_user(callback.from_user.id)
+    if not existing:
+        await callback.answer("Игра не найдена", show_alert=True)
+        return
+    
+    game_id, game, player_id = existing
+    
+    if check_game_over(game):
+        await callback.answer("Игра уже закончена", show_alert=True)
+        return
+    
+    game.surrendered = player_id
+    opponent_id = 'p2' if player_id == 'p1' else 'p1'
+    game.winner = opponent_id
+    
+    await callback.answer("Вы сдались")
+    # Уведомление о сдаче будет в end_game
+    await end_game(game)
+
+
+@dp.callback_query(F.data == "new_game")
+async def callback_new_game(callback: CallbackQuery):
+    """Создать новую игру"""
+    # Проверяем, не участвуем ли пользователь уже в игре
+    existing = get_game_by_user(callback.from_user.id)
+    if existing:
+        await callback.answer("Вы уже участвуете в игре! Завершите текущую игру.", show_alert=True)
+        return
+    
+    # Создаем новую игру
+    game_id = str(uuid.uuid4())[:8]
+    config = get_ship_config('classic')
+    
+    # Сохраняем group_id только если это группа
+    group_id = callback.message.chat.id if callback.message.chat.type != "private" else None
+    
+    game = GameState(
+        id=game_id,
+        mode='classic',
+        is_timed=False,
+        group_id=group_id
+    )
+    
+    # Используем данные пользователя из Telegram
+    user = callback.from_user
+    p1 = Player(
+        user_id=user.id,
+        username=user.username or user.first_name or f"user_{user.id}",
+        board=create_empty_board(config['size']),
+        attacks=create_empty_attacks(config['size'])
+    )
+    
+    game.players['p1'] = p1
+    games[game_id] = game
+    
+    if callback.message.chat.type == "private":
+        text = f"🎮 Новая игра создана!\n\n"
+        text += f"Создатель: @{p1.username}\n"
+        text += f"ID игры: {game_id}\n\n"
+        text += f"Выберите режим игры. После настройки вы получите ссылку для приглашения друга."
+    else:
+        text = f"🎮 Новая игра создана!\n\n"
+        text += f"Создатель: @{p1.username}\n"
+        text += f"ID игры: {game_id}\n\n"
+        text += f"Режим: Обычный (8×8) или Быстрый (6×6)\n"
+        text += f"Выберите режим:"
+    
+    # Удаляем старое сообщение, если есть
+    try:
+        await callback.message.delete()
+    except:
+        pass
+    
+    # Отправляем новое сообщение
+    msg = await callback.message.answer(text, reply_markup=get_mode_keyboard())
+    game.setup_message_id = msg.message_id
+    
+    await callback.answer("Новая игра создана!")
+
+
+@dp.callback_query(F.data.startswith("rematch_"))
+async def callback_rematch(callback: CallbackQuery):
+    """Реванш - создаем игру с выбором режима"""
+    parts = callback.data.split("_")
+    opponent_id = int(parts[1])
+    old_game_id = parts[2] if len(parts) > 2 else None
+    
+    # Пытаемся получить настройки из старой игры
+    old_game = None
+    if old_game_id and old_game_id in games:
+        old_game = games[old_game_id]
+    
+    # Создаем новую игру (пока без режима, будет выбран позже)
+    game_id = str(uuid.uuid4())[:8]
+    config = get_ship_config('classic')  # Временный размер
+    
+    game = GameState(
+        id=game_id,
+        mode='classic',  # Будет изменен при выборе режима
+        is_timed=False,
+        group_id=old_game.group_id if old_game else None
+    )
+    
+    # Сохраняем ID противника в специальном поле для реванша
+    # Используем временное поле в GameState для хранения opponent_id
+    game.rematch_opponent_id = opponent_id  # Добавим это поле в модель
+    
+    # Используем данные пользователя из Telegram
+    user = callback.from_user
+    p1 = Player(
+        user_id=user.id,
+        username=user.username or user.first_name or f"user_{user.id}",
+        board=create_empty_board(config['size']),
+        attacks=create_empty_attacks(config['size'])
+    )
+    
+    game.players['p1'] = p1
+    games[game_id] = game
+    
+    # Удаляем старое сообщение, если есть
+    try:
+        await callback.message.delete()
+    except:
+        pass
+    
+    # Показываем выбор режима создателю
+    text = f"⚔️ Реванш!\n\n"
+    text += f"Выберите режим игры:"
+    
+    msg = await callback.message.answer(text, reply_markup=get_mode_keyboard())
+    game.setup_message_id = msg.message_id
+    await callback.answer("Выберите режим для реванша!")
+
+
+@dp.callback_query(F.data == "refresh")
+async def callback_refresh(callback: CallbackQuery):
+    """Обновить сообщение"""
+    await callback.answer("Обновлено!")  # Отвечаем сразу
+    
+    existing = get_game_by_user(callback.from_user.id)
+    if not existing:
+        return
+    
+    game_id, game, player_id = existing
+    
+    if game.is_ready_to_start() and game.current_player:
+        await send_battle_message(game, player_id, callback.from_user.id)
+    else:
+        await send_setup_message(game, player_id, callback.from_user.id)
+
+
+
+
+@dp.message(Command("help"))
+async def cmd_help(message: Message):
+    """Команда /help - помощь"""
+    bot_info = await get_bot_info()
+    text = (
+        f"❓ Помощь по использованию бота\n\n"
+        f"🎮 Как начать игру:\n"
+        f"1. Отправьте /play (можно в личных сообщениях или в группе)\n"
+        f"2. Выберите режим игры (Обычный или Быстрый)\n"
+        f"3. Выберите, нужен ли таймер\n"
+        f"4. Отправьте ссылку другу или в группу для присоединения\n\n"
+        f"⚓ Расстановка кораблей:\n"
+        f"• Используйте кнопки ← → ↑ ↓ для перемещения\n"
+        f"• Нажмите ↻ Повернуть для изменения ориентации\n"
+        f"• Нажмите ✅ Установить для размещения корабля\n"
+        f"• Или используйте 🎲 Авто для автоматической расстановки\n\n"
+        f"⚔️ Бой:\n"
+        f"• Нажимайте на клетки поля противника (🌊) для атаки\n"
+        f"• Следите за индикатором хода\n"
+        f"• Используйте 🚩 Сдаться для завершения игры\n\n"
+        f"📋 Команды:\n"
+        f"/play - создать новую игру\n"
+        f"/rules - правила игры\n"
+        f"/help - эта справка\n\n"
+        f"Используйте /rules для подробных правил игры."
+    )
+    await message.answer(text)
+
+
+@dp.message(Command("rules"))
+async def cmd_rules(message: Message):
+    """Команда /rules - правила игры"""
+    text = (
+        "📖 Правила игры «Морской бой»:\n\n"
+        "🎯 Цель игры:\n"
+        "Первым уничтожить все корабли противника.\n\n"
+        "⚓ Расстановка кораблей:\n"
+        "1. Каждый игрок расставляет свои корабли на поле\n"
+        "2. Корабли не должны соприкасаться (минимум 1 клетка между ними, включая диагонали)\n"
+        "3. Корабли не должны выходить за границы поля\n"
+        "4. Корабли не должны пересекаться\n\n"
+        "⚔️ Ход игры:\n"
+        "1. Игроки ходят по очереди\n"
+        "2. Каждый ход - одна атака по клетке противника\n"
+        "3. При попадании ход остаётся у атакующего\n"
+        "4. При промахе ход переходит к противнику\n\n"
+        "🏆 Победа:\n"
+        "Игрок, первым уничтоживший все корабли противника, побеждает.\n\n"
+        "📊 Обозначения:\n"
+        "🌊 - море (пустая клетка)\n"
+        "🟥 - ваш корабль (видно только вам)\n"
+        "🟦 - призрачный корабль (при расстановке, если валидно)\n"
+        "❌ - призрачный корабль (при расстановке, если невалидно)\n"
+        "🌊 - море (поле противника, не атаковано)\n"
+        "⚫ - мимо\n"
+        "🔥 - попадание\n"
+        "❌ - уничтожен (красный крест)\n\n"
+        "🎮 Режимы игры:\n"
+        "• Обычный (8×8): 2×3, 2×2, 4×1\n"
+        "• Быстрый (6×6): 1×3, 1×2, 2×1"
+    )
+    await message.answer(text)
+
+
+@dp.callback_query(F.data == "rules")
+async def callback_rules(callback: CallbackQuery):
+    """Правила игры (из callback)"""
+    text = (
+        "📖 Правила игры «Морской бой»:\n\n"
+        "1. Расставьте корабли на поле\n"
+        "2. Корабли не должны соприкасаться (даже по диагонали)\n"
+        "3. По очереди атакуйте клетки противника\n"
+        "4. Побеждает тот, кто первым уничтожит все корабли противника\n\n"
+        "Обозначения:\n"
+        "🌊 - море (пустая клетка)\n"
+        "🟥 - ваш корабль\n"
+        "🌊 - не атакованная клетка противника\n"
+        "⚫ - мимо\n"
+        "🔥 - попадание\n"
+        "❌ - уничтожен (красный крест)"
+    )
+    await callback.answer(text, show_alert=True)
+
+
+async def main():
+    """Главная функция"""
+    # Получаем информацию о боте при запуске
+    bot_info = await get_bot_info()
+    print(f"Бот запущен! @{bot_info['username']} (ID: {bot_info['id']})")
+    print(f"Telegram API: {TELEGRAM_API}")
+    
+    # Устанавливаем команды бота
+    await set_bot_commands()
+    
+    await dp.start_polling(bot)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
