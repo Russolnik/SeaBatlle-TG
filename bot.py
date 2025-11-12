@@ -1476,6 +1476,131 @@ async def callback_surrender(callback: CallbackQuery):
     await end_game(game)
 
 
+@dp.callback_query(F.data == "stop_game")
+async def callback_stop_game(callback: CallbackQuery):
+    """Завершить игру (без победителя)"""
+    await callback.answer()  # Отвечаем сразу
+    
+    existing = get_game_by_user(callback.from_user.id)
+    if not existing:
+        await callback.answer("Игра не найдена", show_alert=True)
+        return
+    
+    game_id, game, player_id = existing
+    
+    if check_game_over(game):
+        await callback.answer("Игра уже закончена", show_alert=True)
+        return
+    
+    # Подтверждение через alert
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    confirm_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Да, завершить", callback_data=f"confirm_stop_{game_id}"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_stop")
+        ]
+    ])
+    
+    await callback.message.answer(
+        "⚠️ Вы уверены, что хотите завершить игру?\n\n"
+        "Игра будет завершена без победителя.",
+        reply_markup=confirm_kb
+    )
+
+
+@dp.callback_query(F.data.startswith("confirm_stop_"))
+async def callback_confirm_stop(callback: CallbackQuery):
+    """Подтверждение завершения игры"""
+    await callback.answer()  # Отвечаем сразу
+    
+    game_id = callback.data.split("_")[2]
+    
+    if game_id not in games:
+        await callback.answer("Игра не найдена", show_alert=True)
+        return
+    
+    game = games[game_id]
+    
+    if check_game_over(game):
+        await callback.answer("Игра уже закончена", show_alert=True)
+        return
+    
+    p1 = game.get_player('p1')
+    p2 = game.get_player('p2')
+    
+    if not p1 or not p2:
+        await callback.answer("Ошибка", show_alert=True)
+        return
+    
+    # Удаляем старые сообщения боя
+    if p1.my_board_message_id:
+        try:
+            await bot.delete_message(chat_id=p1.user_id, message_id=p1.my_board_message_id)
+        except:
+            pass
+    if p1.info_message_id:
+        try:
+            await bot.delete_message(chat_id=p1.user_id, message_id=p1.info_message_id)
+        except:
+            pass
+    if p1.enemy_board_message_id:
+        try:
+            await bot.delete_message(chat_id=p1.user_id, message_id=p1.enemy_board_message_id)
+        except:
+            pass
+    
+    if p2.my_board_message_id:
+        try:
+            await bot.delete_message(chat_id=p2.user_id, message_id=p2.my_board_message_id)
+        except:
+            pass
+    if p2.info_message_id:
+        try:
+            await bot.delete_message(chat_id=p2.user_id, message_id=p2.info_message_id)
+        except:
+            pass
+    if p2.enemy_board_message_id:
+        try:
+            await bot.delete_message(chat_id=p2.user_id, message_id=p2.enemy_board_message_id)
+        except:
+            pass
+    
+    # Отправляем сообщения обоим игрокам
+    stop_text = "⏹ Игра завершена\n\n"
+    stop_text += f"Противник: @{p2.username if callback.from_user.id == p1.user_id else p1.username}\n"
+    stop_text += f"Режим: {'Обычный' if game.mode == 'classic' else 'Быстрый'}\n\n"
+    stop_text += "Игра была завершена по запросу игрока."
+    
+    # Клавиатура для создания новой игры
+    opponent_id = p2.user_id if callback.from_user.id == p1.user_id else p1.user_id
+    stop_kb = get_game_over_keyboard(opponent_id, game.id)
+    
+    await bot.send_message(chat_id=p1.user_id, text=stop_text, reply_markup=stop_kb)
+    await bot.send_message(chat_id=p2.user_id, text=stop_text, reply_markup=stop_kb)
+    
+    # Удаляем сообщение с подтверждением
+    try:
+        await callback.message.delete()
+    except:
+        pass
+    
+    # Удаляем игру
+    if game.id in games:
+        del games[game.id]
+    
+    await callback.answer("Игра завершена")
+
+
+@dp.callback_query(F.data == "cancel_stop")
+async def callback_cancel_stop(callback: CallbackQuery):
+    """Отмена завершения игры"""
+    await callback.answer("Отменено")
+    try:
+        await callback.message.delete()
+    except:
+        pass
+
+
 @dp.callback_query(F.data == "new_game")
 async def callback_new_game(callback: CallbackQuery):
     """Создать новую игру"""

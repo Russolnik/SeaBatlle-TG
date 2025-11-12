@@ -152,6 +152,9 @@ def get_battle_keyboard_enemy(
     # Кнопки управления
     keyboard.append([
         InlineKeyboardButton(text="🚩 Сдаться", callback_data="surrender"),
+        InlineKeyboardButton(text="⏹ Завершить", callback_data="stop_game")
+    ])
+    keyboard.append([
         InlineKeyboardButton(text="🔄 Обновить", callback_data="refresh")
     ])
     
