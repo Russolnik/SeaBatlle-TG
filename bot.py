@@ -1,6 +1,7 @@
 import os
 import uuid
 import asyncio
+import logging
 from datetime import datetime
 from typing import Optional, Literal
 from threading import Thread
@@ -27,6 +28,16 @@ from keyboards import (
 
 load_dotenv()
 
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+    ]
+)
+logger = logging.getLogger(__name__)
+
 # Flask приложение для веб-сервера (чтобы Render видел его как активный сервис)
 app = Flask(__name__)
 
@@ -42,7 +53,11 @@ def index():
 @app.route('/health')
 def health():
     """Health check endpoint для Render"""
-    return {"status": "healthy"}, 200
+    return {
+        "status": "healthy",
+        "active_games": len(games),
+        "timestamp": datetime.now().isoformat()
+    }, 200
 
 def run_flask():
     """Запуск Flask сервера в отдельном потоке"""
@@ -98,7 +113,7 @@ async def set_bot_commands():
         BotCommand(command="rules", description="📖 Правила игры"),
     ]
     await bot.set_my_commands(commands)
-    print("Команды бота установлены")
+    logger.info("Команды бота установлены")
 
 
 # Хранилище игр
@@ -408,7 +423,7 @@ async def update_timer_task(game_id: str):
                         continue
                     else:
                         # Другие ошибки логируем, но не прерываем цикл
-                        print(f"Ошибка при обновлении сообщений: {api_error}")
+                        logger.warning(f"Ошибка при обновлении сообщений: {api_error}")
         except Exception as e:
             error_str = str(e)
             if "Flood control" in error_str or "Too Many Requests" in error_str:
@@ -416,7 +431,7 @@ async def update_timer_task(game_id: str):
                 await asyncio.sleep(10)
                 continue
             else:
-                print(f"Ошибка в update_timer_task: {e}")
+                logger.error(f"Ошибка в update_timer_task: {e}", exc_info=True)
                 # Не прерываем цикл при других ошибках, просто логируем
                 await asyncio.sleep(5)
 
@@ -466,6 +481,9 @@ async def cmd_play(message: Message):
         await message.answer("Вы уже участвуете в игре! Завершите текущую игру.")
         return
     
+    # Логируем создание игры
+    logger.info(f"Создание новой игры пользователем {message.from_user.id} (@{message.from_user.username})")
+    
     game_id = str(uuid.uuid4())[:8]
     config = get_ship_config('classic')  # По умолчанию
     
@@ -490,6 +508,7 @@ async def cmd_play(message: Message):
     
     game.players['p1'] = p1
     games[game_id] = game
+    logger.info(f"Игра {game_id} создана. Активных игр: {len(games)}")
     
     if message.chat.type == "private":
         text = f"🎮 Новая игра создана!\n\n"
@@ -921,7 +940,7 @@ async def cmd_start(message: Message, command: CommandStart):
             except Exception as e:
                 # Если не удалось отправить в группу (например, бот не может отправлять сообщения),
                 # просто игнорируем ошибку
-                print(f"Не удалось отправить уведомление в группу: {e}")
+                logger.warning(f"Не удалось отправить уведомление в группу: {e}")
                 pass
     else:
         bot_info = await get_bot_info()
@@ -1719,7 +1738,7 @@ async def end_game(game: GameState):
             )
             # НЕ сохраняем ID сообщения с результатами - оно должно остаться в группе
         except Exception as e:
-            print(f"Не удалось отправить результаты в группу: {e}")
+            logger.warning(f"Не удалось отправить результаты в группу: {e}")
             pass
     
     # Удаляем все сообщения бота в группе, если игра была создана там
@@ -2196,12 +2215,49 @@ async def callback_rules(callback: CallbackQuery):
     await callback.answer(text, show_alert=True)
 
 
+async def cleanup_old_games():
+    """Очистка старых и неактивных игр"""
+    while True:
+        try:
+            await asyncio.sleep(300)  # Проверяем каждые 5 минут
+            current_time = datetime.now().timestamp()
+            games_to_remove = []
+            
+            for game_id, game in games.items():
+                # Удаляем игры старше 24 часов
+                if current_time - game.created_at > 86400:  # 24 часа
+                    games_to_remove.append(game_id)
+                    logger.info(f"Удалена старая игра {game_id} (старше 24 часов)")
+                    continue
+                
+                # Удаляем игры без второго игрока старше 1 часа
+                if game.players['p2'] is None and current_time - game.created_at > 3600:  # 1 час
+                    games_to_remove.append(game_id)
+                    logger.info(f"Удалена неактивная игра {game_id} (без второго игрока более 1 часа)")
+                    continue
+                
+                # Удаляем завершенные игры старше 1 часа
+                if game.winner and current_time - game.created_at > 3600:
+                    games_to_remove.append(game_id)
+                    logger.info(f"Удалена завершенная игра {game_id}")
+            
+            for game_id in games_to_remove:
+                if game_id in games:
+                    del games[game_id]
+            
+            if games_to_remove:
+                logger.info(f"Очищено {len(games_to_remove)} игр. Активных игр: {len(games)}")
+        except Exception as e:
+            logger.error(f"Ошибка при очистке игр: {e}", exc_info=True)
+            await asyncio.sleep(60)
+
+
 async def main():
     """Главная функция"""
     # Получаем информацию о боте при запуске
     bot_info = await get_bot_info()
-    print(f"Бот запущен! @{bot_info['username']} (ID: {bot_info['id']})")
-    print(f"Telegram API: {TELEGRAM_API}")
+    logger.info(f"Бот запущен! @{bot_info['username']} (ID: {bot_info['id']})")
+    logger.info(f"Telegram API: {TELEGRAM_API}")
     
     # Устанавливаем команды бота
     await set_bot_commands()
@@ -2210,8 +2266,11 @@ async def main():
     flask_thread = Thread(target=run_flask, daemon=True)
     flask_thread.start()
     port = int(os.getenv("PORT", 5000))
-    print(f"Flask сервер запущен на порту {port}")
-    print(f"Health check: http://0.0.0.0:{port}/health")
+    logger.info(f"Flask сервер запущен на порту {port}")
+    logger.info(f"Health check: http://0.0.0.0:{port}/health")
+    
+    # Запускаем задачу очистки старых игр
+    asyncio.create_task(cleanup_old_games())
     
     await dp.start_polling(bot)
 
