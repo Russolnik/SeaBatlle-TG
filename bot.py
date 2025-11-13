@@ -537,7 +537,7 @@ async def cmd_play(message: Message):
     
     game.players['p1'] = p1
     games[game_id] = game
-    logger.info(f"Игра {game_id} создана. Активных игр: {len(games)}")
+    logger.info(f"Игра {game_id} создана. Активных игр: {len(games)}, group_id: {group_id}, chat_type: {message.chat.type}")
     
     if message.chat.type == "private":
         text = f"🎮 Новая игра создана!\n\n"
@@ -960,31 +960,45 @@ async def cmd_start(message: Message, command: CommandStart):
         
         # Если игра в группе, отправляем уведомление в группу
         if game.group_id:
+            logger.info(f"Попытка отправить уведомление о начале игры в группу {game.group_id}, режим: {game.mode}, p1: {p1.user_id if p1 else None}, p2: {p2.user_id if p2 else None}")
             try:
-                # Формируем ссылки на игроков
-                # Для p1: если есть username, используем @username, иначе ссылку с именем
-                if p1 and p1.username:
-                    p1_link = f"@{p1.username}"
-                elif p1:
-                    # Пытаемся получить информацию о пользователе через API
+                # Получаем имена игроков безопасным способом
+                p1_name = "Игрок 1"
+                p2_name = "Игрок 2"
+                
+                if p1:
                     try:
                         p1_user = await bot.get_chat(p1.user_id)
                         p1_name = p1_user.first_name or p1_user.username or f"Игрок {p1.user_id}"
-                        p1_link = f"[{p1_name}](tg://user?id={p1.user_id})"
-                    except:
-                        p1_link = f"[{p1.username}](tg://user?id={p1.user_id})"
+                    except Exception as e:
+                        logger.warning(f"Не удалось получить информацию о p1 ({p1.user_id}): {e}")
+                        p1_name = p1.username or p1_name
+                
+                if p2:
+                    try:
+                        p2_user = await bot.get_chat(p2.user_id)
+                        p2_name = p2_user.first_name or p2_user.username or f"Игрок {p2.user_id}"
+                    except Exception as e:
+                        logger.warning(f"Не удалось получить информацию о p2 ({p2.user_id}): {e}")
+                        p2_name = p2.username or message.from_user.first_name or p2_name
+                
+                # Формируем ссылки на игроков (используем HTML для более надежной работы)
+                if p1 and p1.username:
+                    p1_link = f'<a href="tg://user?id={p1.user_id}">@{p1.username}</a>'
+                elif p1:
+                    p1_link = f'<a href="tg://user?id={p1.user_id}">{p1_name}</a>'
                 else:
                     p1_link = "Игрок 1"
                 
-                # Для p2: используем данные из message.from_user
-                if p2.username:
-                    p2_link = f"@{p2.username}"
+                if p2 and p2.username:
+                    p2_link = f'<a href="tg://user?id={p2.user_id}">@{p2.username}</a>'
+                elif p2:
+                    p2_link = f'<a href="tg://user?id={p2.user_id}">{p2_name}</a>'
                 else:
-                    p2_name = message.from_user.first_name or message.from_user.username or f"Игрок {p2.user_id}"
-                    p2_link = f"[{p2_name}](tg://user?id={p2.user_id})"
+                    p2_link = "Игрок 2"
                 
                 group_notification = "🎮 Игра началась!\n\n"
-                group_notification += f"👥 Игроки:\n"
+                group_notification += "👥 Игроки:\n"
                 group_notification += f"1️⃣ {p1_link}\n"
                 group_notification += f"2️⃣ {p2_link}\n\n"
                 group_notification += f"Режим: {'Обычный (8×8)' if game.mode == 'classic' else 'Быстрый (6×6)'}\n"
@@ -1010,20 +1024,57 @@ async def cmd_start(message: Message, command: CommandStart):
                     logger.warning(f"Игра {game_id} была удалена перед отправкой уведомления в группу")
                     return
                 
-                msg = await bot.send_message(
-                    chat_id=game.group_id,
-                    text=group_notification,
-                    parse_mode="Markdown",
-                    reply_markup=notification_keyboard if bot_username else None
-                )
-                # Сохраняем ID сообщения в группе
-                if game_id in games:  # Проверяем еще раз перед сохранением
-                    game.group_messages.append(msg.message_id)
+                # Дополнительная проверка group_id
+                if not game.group_id:
+                    logger.warning(f"game.group_id is None для игры {game_id}, пропускаем отправку в группу")
+                    return
+                
+                # Пытаемся отправить с HTML форматированием
+                try:
+                    msg = await bot.send_message(
+                        chat_id=game.group_id,
+                        text=group_notification,
+                        parse_mode="HTML",
+                        reply_markup=notification_keyboard if bot_username else None
+                    )
+                    # Сохраняем ID сообщения в группе
+                    if game_id in games:  # Проверяем еще раз перед сохранением
+                        game.group_messages.append(msg.message_id)
+                    logger.info(f"Уведомление о начале игры отправлено в группу {game.group_id}")
+                except Exception as html_error:
+                    # Если HTML не работает, пробуем без форматирования
+                    logger.warning(f"Ошибка при отправке с HTML форматированием: {html_error}, пробуем без форматирования")
+                    try:
+                        # Формируем текст без ссылок
+                        simple_notification = "🎮 Игра началась!\n\n"
+                        simple_notification += "👥 Игроки:\n"
+                        simple_notification += f"1️⃣ {p1_name}\n"
+                        simple_notification += f"2️⃣ {p2_name}\n\n"
+                        simple_notification += f"Режим: {'Обычный (8×8)' if game.mode == 'classic' else 'Быстрый (6×6)'}\n"
+                        simple_notification += f"Таймер: {'включен' if game.is_timed else 'выключен'}"
+                        
+                        msg = await bot.send_message(
+                            chat_id=game.group_id,
+                            text=simple_notification,
+                            reply_markup=notification_keyboard if bot_username else None
+                        )
+                        if game_id in games:
+                            game.group_messages.append(msg.message_id)
+                        logger.info(f"Уведомление о начале игры отправлено в группу {game.group_id} (без форматирования)")
+                    except Exception as simple_error:
+                        logger.error(f"Не удалось отправить уведомление в группу {game.group_id}: {simple_error}", exc_info=True)
+                        # Пытаемся отправить хотя бы простое сообщение
+                        try:
+                            await bot.send_message(
+                                chat_id=game.group_id,
+                                text=f"🎮 Игра началась! Режим: {'Обычный (8×8)' if game.mode == 'classic' else 'Быстрый (6×6)'}"
+                            )
+                        except:
+                            pass
             except Exception as e:
                 # Если не удалось отправить в группу (например, бот не может отправлять сообщения),
-                # просто игнорируем ошибку
-                logger.warning(f"Не удалось отправить уведомление в группу: {e}")
-                pass
+                # логируем ошибку с полной информацией
+                logger.error(f"Критическая ошибка при отправке уведомления в группу {game.group_id}: {e}", exc_info=True)
         
         # Удаляем сообщение команды после присоединения к игре
         try:
