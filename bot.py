@@ -475,11 +475,19 @@ async def start_battle(game: GameState):
 @dp.message(Command("play"))
 async def cmd_play(message: Message):
     """Команда /play - создать игру"""
-    # Проверяем, не участвует ли пользователь уже в игре
+    # Проверяем, не участвует ли пользователь уже в активной игре
     existing = get_game_by_user(message.from_user.id)
     if existing:
-        await message.answer("Вы уже участвуете в игре! Завершите текущую игру.")
-        return
+        game_id, game, player_id = existing
+        # Проверяем, не завершена ли игра
+        if not game.winner and not game.surrendered:
+            await message.answer("❌ Вы уже участвуете в активной игре! Завершите текущую игру перед созданием новой.\n\nИспользуйте /stop для отмены игры или кнопку 'Сдаться' во время боя.")
+            return
+        else:
+            # Если игра завершена, удаляем её и позволяем создать новую
+            logger.info(f"Удалена завершенная игра {game_id} перед созданием новой")
+            if game.id in games:
+                del games[game.id]
     
     # Логируем создание игры
     logger.info(f"Создание новой игры пользователем {message.from_user.id} (@{message.from_user.username})")
@@ -855,6 +863,15 @@ async def cmd_start(message: Message, command: CommandStart):
             return
         
         game = games[game_id]
+        
+        # Проверяем, не участвует ли пользователь уже в другой активной игре
+        existing = get_game_by_user(message.from_user.id)
+        if existing:
+            existing_game_id, existing_game, player_id = existing
+            # Если это не та же игра и она не завершена
+            if existing_game_id != game_id and not existing_game.winner and not existing_game.surrendered:
+                await message.answer("❌ Вы уже участвуете в другой активной игре! Завершите текущую игру перед присоединением к новой.")
+                return
         
         if game.players['p2'] is not None:
             await message.answer("В игре уже есть второй игрок")
@@ -1913,11 +1930,18 @@ async def callback_cancel_stop(callback: CallbackQuery):
 @dp.callback_query(F.data == "new_game")
 async def callback_new_game(callback: CallbackQuery):
     """Создать новую игру"""
-    # Проверяем, не участвуем ли пользователь уже в игре
+    # Проверяем, не участвуем ли пользователь уже в активной игре
     existing = get_game_by_user(callback.from_user.id)
     if existing:
-        await callback.answer("Вы уже участвуете в игре! Завершите текущую игру.", show_alert=True)
-        return
+        game_id, game, player_id = existing
+        # Проверяем, не завершена ли игра
+        if not game.winner and not game.surrendered:
+            await callback.answer("❌ Вы уже участвуете в активной игре! Завершите текущую игру перед созданием новой.", show_alert=True)
+            return
+        else:
+            # Если игра завершена, удаляем её и позволяем создать новую
+            if game.id in games:
+                del games[game.id]
     
     # Создаем новую игру
     game_id = str(uuid.uuid4())[:8]
@@ -1973,6 +1997,19 @@ async def callback_new_game(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("rematch_"))
 async def callback_rematch(callback: CallbackQuery):
     """Реванш - создаем игру с выбором режима"""
+    # Проверяем, не участвуем ли пользователь уже в активной игре
+    existing = get_game_by_user(callback.from_user.id)
+    if existing:
+        game_id, game, player_id = existing
+        # Проверяем, не завершена ли игра
+        if not game.winner and not game.surrendered:
+            await callback.answer("❌ Вы уже участвуете в активной игре! Завершите текущую игру перед созданием реванша.", show_alert=True)
+            return
+        else:
+            # Если игра завершена, удаляем её и позволяем создать реванш
+            if game.id in games:
+                del games[game.id]
+    
     parts = callback.data.split("_")
     opponent_id = int(parts[1])
     old_game_id = parts[2] if len(parts) > 2 else None
