@@ -498,6 +498,11 @@ async def cmd_play(message: Message):
         # Проверяем, не завершена ли игра
         if not game.winner and not game.surrendered:
             await message.answer("❌ Вы уже участвуете в активной игре! Завершите текущую игру перед созданием новой.\n\nИспользуйте /stop для отмены игры или кнопку 'Сдаться' во время боя.")
+            # Удаляем сообщение команды
+            try:
+                await message.delete()
+            except:
+                pass
             return
         else:
             # Если игра завершена, удаляем её и позволяем создать новую
@@ -548,6 +553,12 @@ async def cmd_play(message: Message):
     
     msg = await message.answer(text, reply_markup=get_mode_keyboard(game.mode, game.is_timed if game.is_timed else None))
     game.setup_message_id = msg.message_id
+    
+    # Удаляем сообщение команды
+    try:
+        await message.delete()
+    except:
+        pass
     # Если игра в группе, сохраняем ID сообщения
     if game.group_id:
         game.group_messages.append(msg.message_id)
@@ -579,6 +590,11 @@ async def cmd_stop(message: Message):
             await message.answer("У вас нет активной игры. Используйте кнопку 'Завершить' во время игры.")
         else:
             await message.answer("В этой группе нет активной игры.")
+        # Удаляем сообщение команды
+        try:
+            await message.delete()
+        except:
+            pass
         return
     
     game_id, game = game_to_stop
@@ -590,6 +606,11 @@ async def cmd_stop(message: Message):
     
     if not is_creator:
         await message.answer("❌ Только создатель игры может отменить игру.")
+        # Удаляем сообщение команды
+        try:
+            await message.delete()
+        except:
+            pass
         return
     
     # Удаляем все сообщения игры
@@ -876,6 +897,11 @@ async def cmd_start(message: Message, command: CommandStart):
         
         if game_id not in games:
             await message.answer("Игра не найдена или уже началась")
+            # Удаляем сообщение команды
+            try:
+                await message.delete()
+            except:
+                pass
             return
         
         game = games[game_id]
@@ -913,6 +939,11 @@ async def cmd_start(message: Message, command: CommandStart):
         # Проверяем, что игра все еще существует перед отправкой сообщений
         if game_id not in games:
             await message.answer("❌ Игра была удалена. Попробуйте создать новую.")
+            # Удаляем сообщение команды
+            try:
+                await message.delete()
+            except:
+                pass
             return
         
         # Отправляем сообщения обоим игрокам для расстановки
@@ -993,6 +1024,12 @@ async def cmd_start(message: Message, command: CommandStart):
                 # просто игнорируем ошибку
                 logger.warning(f"Не удалось отправить уведомление в группу: {e}")
                 pass
+        
+        # Удаляем сообщение команды после присоединения к игре
+        try:
+            await message.delete()
+        except:
+            pass
     else:
         bot_info = await get_bot_info()
         await message.answer(
@@ -1004,6 +1041,11 @@ async def cmd_start(message: Message, command: CommandStart):
             f"/rules - правила игры\n\n"
             f"Используйте /play, чтобы создать игру. Вы сможете отправить ссылку другу или в группу для присоединения."
         )
+        # Удаляем сообщение команды
+        try:
+            await message.delete()
+        except:
+            pass
 
 
 @dp.callback_query(F.data == "auto_place")
@@ -2282,6 +2324,11 @@ async def cmd_help(message: Message):
         f"Используйте /rules для подробных правил игры."
     )
     await message.answer(text)
+    # Удаляем сообщение команды
+    try:
+        await message.delete()
+    except:
+        pass
 
 
 @dp.message(Command("rules"))
@@ -2317,6 +2364,11 @@ async def cmd_rules(message: Message):
         "• Быстрый (6×6): 1×3, 1×2, 2×1 (всего 4 корабля)"
     )
     await message.answer(text)
+    # Удаляем сообщение команды
+    try:
+        await message.delete()
+    except:
+        pass
 
 
 @dp.callback_query(F.data == "rules")
