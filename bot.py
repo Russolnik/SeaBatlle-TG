@@ -122,10 +122,9 @@ def get_game_by_user(user_id: int) -> Optional[tuple[str, GameState, str]]:
 
 def format_board_text(board: list[list[str]], size: int) -> str:
     """Форматировать поле в текст"""
-    letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[:size]
-    text = "   " + " ".join(letters[:size]) + "\n"
-    for i, row in enumerate(board):
-        text += f"{i+1:2} " + " ".join(row) + "\n"
+    text = ""
+    for row in board:
+        text += " ".join(row) + "\n"
     return text
 
 
@@ -177,7 +176,8 @@ async def send_setup_message(game: GameState, player_id: str, chat_id: int):
             player.current_ship_col,
             player.current_ship_horizontal,
             ship_index,
-            show_preview=True
+            show_preview=True,
+            is_p2=(player_id == 'p2')
         )
     else:
         player_status = "✅ Вы готовы" if player.ready else "⏳ Ожидание"
@@ -189,7 +189,8 @@ async def send_setup_message(game: GameState, player_id: str, chat_id: int):
         keyboard = get_setup_keyboard(
             player.board,
             game.mode,
-            show_preview=False
+            show_preview=False,
+            is_p2=(player_id == 'p2')
         )
 
     # Всегда пытаемся обновить существующее сообщение
@@ -229,7 +230,7 @@ async def send_battle_message(game: GameState, player_id: str, chat_id: int):
     config = get_ship_config(game.mode)
     
     # Эмодзи для хода
-    turn_emoji = "👆" if is_my_turn else "⏰"
+    turn_emoji = "👉" if is_my_turn else "⏰"
     if is_my_turn:
         turn_text = f"{turn_emoji} Ваш ход"
     else:
@@ -245,9 +246,7 @@ async def send_battle_message(game: GameState, player_id: str, chat_id: int):
         timer_text = f"\n⏱ Осталось: {minutes}:{seconds:02d}"
     
     # Создаем копию своего поля для отображения атак противника
-    # Показываем только попадания (🔥, ❌), но не показываем мимо (⚫)
-    # ⚫ может быть как мимо, так и заблокированной клеткой вокруг корабля
-    # Показываем ⚫ только если это заблокированная клетка (рядом с уничтоженным кораблем)
+    # Показываем ВСЕ ходы противника: корабли, попадания (🔥, ❌), и мимо (⚫)
     display_board = []
     for r in range(config['size']):
         row = []
@@ -256,27 +255,9 @@ async def send_battle_message(game: GameState, player_id: str, chat_id: int):
             # Если это корабль, показываем его
             if cell == '🟥':
                 row.append('🟥')
-            # Если это попадание или уничтоженный корабль, показываем
-            elif cell in ['🔥', '❌']:
+            # Если это попадание, уничтоженный корабль или мимо, показываем
+            elif cell in ['🔥', '❌', '⚫']:
                 row.append(cell)
-            # Если это ⚫, проверяем, это мимо или заблокированная клетка
-            elif cell == '⚫':
-                # Проверяем, есть ли рядом уничтоженный корабль
-                is_blocked = False
-                for dr in [-1, 0, 1]:
-                    for dc in [-1, 0, 1]:
-                        nr, nc = r + dr, c + dc
-                        if 0 <= nr < config['size'] and 0 <= nc < config['size']:
-                            if player.board[nr][nc] == '❌':
-                                is_blocked = True
-                                break
-                    if is_blocked:
-                        break
-                # Показываем ⚫ только если это заблокированная клетка, иначе показываем море
-                if is_blocked:
-                    row.append('⚫')
-                else:
-                    row.append('🌊')
             else:
                 # Море или другое
                 row.append('🌊')
@@ -284,6 +265,7 @@ async def send_battle_message(game: GameState, player_id: str, chat_id: int):
     
     # Сообщение с моим полем (сверху)
     my_text = f"🎮 Игра с @{opponent.username}\n\n"
+    my_text += f"👥 Игроки: @{player.username} vs @{opponent.username}\n"
     my_text += f"⏱ Режим: {'с таймером' if game.is_timed else 'без таймера'}{timer_text}\n"
     my_text += f"{turn_text}\n\n"
     my_text += f"📍 ВАШЕ ПОЛЕ:"
@@ -295,7 +277,7 @@ async def send_battle_message(game: GameState, player_id: str, chat_id: int):
     
     # Чей ход
     current_player_name = player.username if is_my_turn else opponent.username
-    info_text += f"👆 Ход: @{current_player_name}\n"
+    info_text += f"👉 Ход: @{current_player_name}\n"
     
     # Таймер (если есть)
     if game.is_timed and game.last_move_time:
@@ -521,7 +503,7 @@ async def cmd_play(message: Message):
         text += f"Режим: Обычный (8×8) или Быстрый (6×6)\n"
         text += f"Выберите режим:"
     
-    msg = await message.answer(text, reply_markup=get_mode_keyboard())
+    msg = await message.answer(text, reply_markup=get_mode_keyboard(game.mode, game.is_timed if game.is_timed else None))
     game.setup_message_id = msg.message_id
     # Если игра в группе, сохраняем ID сообщения
     if game.group_id:
@@ -560,23 +542,11 @@ async def cmd_stop(message: Message):
     p1 = game.get_player('p1')
     p2 = game.get_player('p2')
     
-    # Проверяем права: создатель игры или администратор группы
+    # Проверяем права: только создатель игры может отменить
     is_creator = p1 and p1.user_id == user_id
-    is_admin = False
     
-    if not is_creator and message.chat.type != "private":
-        # Проверяем, является ли пользователь администратором группы
-        try:
-            chat_member = await bot.get_chat_member(chat_id=message.chat.id, user_id=user_id)
-            is_admin = chat_member.status in ['administrator', 'creator']
-        except:
-            pass
-    
-    if not is_creator and not is_admin:
-        if message.chat.type == "private":
-            await message.answer("❌ Только создатель игры может отменить игру.")
-        else:
-            await message.answer("❌ Только создатель игры или администратор группы может отменить игру.")
+    if not is_creator:
+        await message.answer("❌ Только создатель игры может отменить игру.")
         return
     
     # Удаляем все сообщения игры
@@ -625,12 +595,8 @@ async def cmd_stop(message: Message):
                 pass
     
     # Уведомляем игроков в личку
-    if message.chat.type == "private":
-        cancel_text = "⏹ Игра отменена\n\n"
-        cancel_text += "Игра была отменена создателем."
-    else:
-        cancel_text = "⏹ Игра отменена\n\n"
-        cancel_text += f"Игра в группе была отменена {'создателем' if is_creator else 'администратором группы'}."
+    cancel_text = "⏹ Игра отменена\n\n"
+    cancel_text += "Игра была отменена создателем."
     
     if p1:
         try:
@@ -656,7 +622,7 @@ async def cmd_stop(message: Message):
     if message.chat.type != "private":
         user_name = message.from_user.username or message.from_user.first_name or "Пользователь"
         group_text = f"⏹ Игра отменена\n\n"
-        group_text += f"Игра была отменена {'создателем' if is_creator else 'администратором'} @{user_name}."
+        group_text += f"Игра была отменена создателем @{user_name}."
         
         await message.answer(group_text)
     else:
@@ -704,14 +670,14 @@ async def callback_mode(callback: CallbackQuery):
         
         # Обновляем существующее сообщение
         try:
-            await callback.message.edit_text(text, reply_markup=get_mode_keyboard())
+            await callback.message.edit_text(text, reply_markup=get_mode_keyboard(game.mode, game.is_timed if game.is_timed else None))
         except Exception:
             # Если не удалось обновить, удаляем старое и создаем новое
             try:
                 await callback.message.delete()
             except:
                 pass
-            msg = await callback.message.answer(text, reply_markup=get_mode_keyboard())
+            msg = await callback.message.answer(text, reply_markup=get_mode_keyboard(game.mode, game.is_timed if game.is_timed else None))
             if game.setup_message_id:
                 try:
                     await bot.delete_message(chat_id=callback.from_user.id, message_id=game.setup_message_id)
@@ -727,14 +693,14 @@ async def callback_mode(callback: CallbackQuery):
     
     # Обновляем существующее сообщение
     try:
-        await callback.message.edit_text(text, reply_markup=get_mode_keyboard())
+        await callback.message.edit_text(text, reply_markup=get_mode_keyboard(game.mode, game.is_timed if game.is_timed else None))
     except Exception:
         # Если не удалось обновить, удаляем старое и создаем новое
         try:
             await callback.message.delete()
         except:
             pass
-        msg = await callback.message.answer(text, reply_markup=get_mode_keyboard())
+        msg = await callback.message.answer(text, reply_markup=get_mode_keyboard(game.mode, game.is_timed if game.is_timed else None))
         # Сохраняем ID сообщения для будущих обновлений
         if game.setup_message_id:
             try:
@@ -929,10 +895,26 @@ async def cmd_start(message: Message, command: CommandStart):
                 group_notification += f"Режим: {'Обычный (8×8)' if game.mode == 'classic' else 'Быстрый (6×6)'}\n"
                 group_notification += f"Таймер: {'включен' if game.is_timed else 'выключен'}"
                 
+                # Получаем информацию о боте для кнопки
+                bot_info = await get_bot_info()
+                bot_username = bot_info.get('username', '')
+                
+                # Создаем клавиатуру с кнопкой "Перейти в бота"
+                from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+                notification_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="🤖 Перейти в бота",
+                            url=f"https://t.me/{bot_username}" if bot_username else None
+                        )
+                    ]
+                ])
+                
                 msg = await bot.send_message(
                     chat_id=game.group_id,
                     text=group_notification,
-                    parse_mode="Markdown"
+                    parse_mode="Markdown",
+                    reply_markup=notification_keyboard if bot_username else None
                 )
                 # Сохраняем ID сообщения в группе
                 game.group_messages.append(msg.message_id)
@@ -1714,13 +1696,28 @@ async def end_game(game: GameState):
             group_result += f"❌ {loser_link}: {loser_ships} кораблей осталось\n\n"
             group_result += f"Режим: {'Обычный (8×8)' if game.mode == 'classic' else 'Быстрый (6×6)'}"
             
+            # Получаем информацию о боте для кнопки
+            bot_info = await get_bot_info()
+            bot_username = bot_info.get('username', '')
+            
+            # Создаем клавиатуру с кнопкой "Перейти в бота"
+            from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+            result_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="🤖 Перейти в бота",
+                        url=f"https://t.me/{bot_username}" if bot_username else None
+                    )
+                ]
+            ])
+            
             result_msg = await bot.send_message(
                 chat_id=game.group_id,
                 text=group_result,
-                parse_mode="Markdown"
+                parse_mode="Markdown",
+                reply_markup=result_keyboard if bot_username else None
             )
-            # Сохраняем ID сообщения с результатами для последующего удаления
-            game.group_messages.append(result_msg.message_id)
+            # НЕ сохраняем ID сообщения с результатами - оно должно остаться в группе
         except Exception as e:
             print(f"Не удалось отправить результаты в группу: {e}")
             pass
@@ -1948,7 +1945,7 @@ async def callback_new_game(callback: CallbackQuery):
         pass
     
     # Отправляем новое сообщение
-    msg = await callback.message.answer(text, reply_markup=get_mode_keyboard())
+    msg = await callback.message.answer(text, reply_markup=get_mode_keyboard(game.mode, game.is_timed if game.is_timed else None))
     game.setup_message_id = msg.message_id
     
     await callback.answer("Новая игра создана!")
@@ -2003,9 +2000,96 @@ async def callback_rematch(callback: CallbackQuery):
     text = f"⚔️ Реванш!\n\n"
     text += f"Выберите режим игры:"
     
-    msg = await callback.message.answer(text, reply_markup=get_mode_keyboard())
+    msg = await callback.message.answer(text, reply_markup=get_mode_keyboard(game.mode, game.is_timed if game.is_timed else None))
     game.setup_message_id = msg.message_id
     await callback.answer("Выберите режим для реванша!")
+
+
+@dp.callback_query(F.data == "leave_queue")
+async def callback_leave_queue(callback: CallbackQuery):
+    """Выход из очереди (только для присоединившегося игрока)"""
+    await callback.answer()  # Отвечаем сразу
+    
+    existing = get_game_by_user(callback.from_user.id)
+    if not existing:
+        await callback.answer("Игра не найдена", show_alert=True)
+        return
+    
+    game_id, game, player_id = existing
+    
+    # Только p2 может выйти из очереди
+    if player_id != 'p2':
+        await callback.answer("Только присоединившийся игрок может выйти из очереди", show_alert=True)
+        return
+    
+    # Проверяем, что игра еще не началась
+    if game.is_ready_to_start() and game.current_player:
+        await callback.answer("Игра уже началась, нельзя выйти из очереди", show_alert=True)
+        return
+    
+    p1 = game.get_player('p1')
+    p2 = game.get_player('p2')
+    
+    if not p1 or not p2:
+        await callback.answer("Ошибка", show_alert=True)
+        return
+    
+    # Удаляем сообщения p2
+    if p2.setup_message_id:
+        try:
+            await bot.delete_message(chat_id=p2.user_id, message_id=p2.setup_message_id)
+        except:
+            pass
+    
+    # Удаляем p2 из игры
+    game.players['p2'] = None
+    
+    # Уведомляем p1
+    if p1.setup_message_id:
+        try:
+            await bot.edit_message_text(
+                text=f"🎮 Ожидание игрока...\n\n"
+                     f"Создатель: @{p1.username}\n"
+                     f"ID игры: {game_id}\n\n"
+                     f"Второй игрок вышел из очереди. Ожидаем нового игрока.",
+                chat_id=p1.user_id,
+                message_id=p1.setup_message_id,
+                reply_markup=get_join_keyboard(game_id, (await get_bot_info())['username'], show_share=(game.group_id is None))
+            )
+        except:
+            pass
+    
+    # Уведомляем p2
+    await callback.message.answer("✅ Вы вышли из очереди.")
+    
+    # Удаляем сообщения в группе, если игра была в группе
+    if game.group_id and game.group_messages:
+        for msg_id in game.group_messages:
+            try:
+                await bot.delete_message(chat_id=game.group_id, message_id=msg_id)
+            except:
+                pass
+        game.group_messages.clear()
+    
+    # Если игра была в группе, отправляем новое сообщение с приглашением
+    if game.group_id:
+        try:
+            bot_info = await get_bot_info()
+            text = f"🎮 Новая игра создана!\n\n"
+            text += f"Создатель: @{p1.username}\n"
+            text += f"ID игры: {game_id}\n\n"
+            text += f"Режим: {'Обычный (8×8)' if game.mode == 'classic' else 'Быстрый (6×6)'}\n"
+            text += f"Таймер: {'включен' if game.is_timed else 'выключен'}\n\n"
+            text += f"Присоединяйтесь:"
+            
+            msg = await bot.send_message(
+                chat_id=game.group_id,
+                text=text,
+                reply_markup=get_join_keyboard(game_id, bot_info['username'])
+            )
+            game.group_messages.append(msg.message_id)
+        except:
+            pass
 
 
 @dp.callback_query(F.data == "refresh")

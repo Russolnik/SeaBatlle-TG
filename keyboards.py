@@ -3,16 +3,24 @@ from typing import Literal, Optional
 from game_logic import get_ship_config, GAME_MODES
 
 
-def get_mode_keyboard() -> InlineKeyboardMarkup:
+def get_mode_keyboard(mode: Optional[Literal['classic', 'fast']] = None, is_timed: Optional[bool] = None) -> InlineKeyboardMarkup:
     """Клавиатура выбора режима игры"""
+    # Текст для режимов с галочками
+    classic_text = "✅ Обычный (8×8)" if mode == 'classic' else "Обычный (8×8)"
+    fast_text = "✅ Быстрый (6×6)" if mode == 'fast' else "Быстрый (6×6)"
+    
+    # Текст для таймера с галочками
+    timer_yes_text = "✅ С таймером" if is_timed is True else "С таймером"
+    timer_no_text = "✅ Без таймера" if is_timed is False else "Без таймера"
+    
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="Обычный (8×8)", callback_data="mode_classic"),
-            InlineKeyboardButton(text="Быстрый (6×6)", callback_data="mode_fast")
+            InlineKeyboardButton(text=classic_text, callback_data="mode_classic"),
+            InlineKeyboardButton(text=fast_text, callback_data="mode_fast")
         ],
         [
-            InlineKeyboardButton(text="С таймером", callback_data="timer_yes"),
-            InlineKeyboardButton(text="Без таймера", callback_data="timer_no")
+            InlineKeyboardButton(text=timer_yes_text, callback_data="timer_yes"),
+            InlineKeyboardButton(text=timer_no_text, callback_data="timer_no")
         ]
     ])
     return keyboard
@@ -61,7 +69,8 @@ def get_setup_keyboard(
     ship_col: int = 0,
     ship_horizontal: bool = True,
     ship_index: int = 0,
-    show_preview: bool = True
+    show_preview: bool = True,
+    is_p2: bool = False
 ) -> InlineKeyboardMarkup:
     """Клавиатура для расстановки кораблей"""
     from game_logic import get_ship_config, get_preview_board
@@ -114,6 +123,12 @@ def get_setup_keyboard(
         InlineKeyboardButton(text="✅ Готово", callback_data="ready")
     ])
     
+    # Кнопка выхода из очереди только для присоединившегося игрока (p2)
+    if is_p2:
+        keyboard.append([
+            InlineKeyboardButton(text="🚪 Выйти из очереди", callback_data="leave_queue")
+        ])
+    
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
@@ -133,7 +148,10 @@ def get_battle_keyboard_enemy(
         row_buttons = []
         for col in range(size):
             cell = enemy_attacks[row][col]
+            # Можно атаковать только пустые клетки (🌊) во время своего хода
+            # Все остальные клетки (промахи ⚫, попадания 🔥, уничтоженные ❌) показываем всегда
             if is_my_turn and cell == '🌊':
+                # Пустая клетка во время своего хода - можно атаковать
                 row_buttons.append(
                     InlineKeyboardButton(
                         text=cell,
@@ -141,6 +159,7 @@ def get_battle_keyboard_enemy(
                     )
                 )
             else:
+                # Показываем все остальные клетки: промахи (⚫), попадания (🔥), уничтоженные (❌), или пустые (🌊) когда не мой ход
                 row_buttons.append(
                     InlineKeyboardButton(
                         text=cell,
@@ -151,8 +170,7 @@ def get_battle_keyboard_enemy(
     
     # Кнопки управления
     keyboard.append([
-        InlineKeyboardButton(text="🚩 Сдаться", callback_data="surrender"),
-        InlineKeyboardButton(text="⏹ Завершить", callback_data="stop_game")
+        InlineKeyboardButton(text="🚩 Сдаться", callback_data="surrender")
     ])
     keyboard.append([
         InlineKeyboardButton(text="🔄 Обновить", callback_data="refresh")
