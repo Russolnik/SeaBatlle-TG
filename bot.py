@@ -145,6 +145,11 @@ def format_board_text(board: list[list[str]], size: int) -> str:
 
 async def send_setup_message(game: GameState, player_id: str, chat_id: int):
     """Отправить сообщение с расстановкой кораблей"""
+    # Проверяем, что игра все еще существует
+    if game.id not in games:
+        logger.warning(f"Попытка отправить сообщение для удаленной игры {game.id}")
+        return
+    
     player = game.get_player(player_id)
     if not player:
         return
@@ -236,6 +241,11 @@ async def send_setup_message(game: GameState, player_id: str, chat_id: int):
 
 async def send_battle_message(game: GameState, player_id: str, chat_id: int):
     """Отправить сообщения с боем (2 сообщения: мое поле и поле врага)"""
+    # Проверяем, что игра все еще существует
+    if game.id not in games:
+        logger.warning(f"Попытка отправить сообщение боя для удаленной игры {game.id}")
+        return
+    
     player = game.get_player(player_id)
     opponent = game.get_opponent(player_id)
     if not player or not opponent:
@@ -262,13 +272,19 @@ async def send_battle_message(game: GameState, player_id: str, chat_id: int):
     
     # Создаем копию своего поля для отображения атак противника
     # Показываем ВСЕ ходы противника: корабли, попадания (🔥, ❌), и мимо (⚫)
+    # Последний ход противника (если промах) подсвечиваем зеленым кружком (🟢)
     display_board = []
     for r in range(config['size']):
         row = []
         for c in range(config['size']):
             cell = player.board[r][c]
+            # Проверяем, является ли это последним ходом противника (промах)
+            if (player.last_enemy_move and player.last_enemy_move_was_miss and 
+                player.last_enemy_move == (r, c) and cell == '⚫'):
+                # Подсвечиваем последний ход противника зеленым кружком
+                row.append('🟢')
             # Если это корабль, показываем его
-            if cell == '🟥':
+            elif cell == '🟥':
                 row.append('🟥')
             # Если это попадание, уничтоженный корабль или мимо, показываем
             elif cell in ['🔥', '❌', '⚫']:
@@ -892,12 +908,24 @@ async def cmd_start(message: Message, command: CommandStart):
         )
         
         game.players['p2'] = p2
+        logger.info(f"Игрок {p2.user_id} (@{p2.username}) присоединился к игре {game_id}")
+        
+        # Проверяем, что игра все еще существует перед отправкой сообщений
+        if game_id not in games:
+            await message.answer("❌ Игра была удалена. Попробуйте создать новую.")
+            return
         
         # Отправляем сообщения обоим игрокам для расстановки
         p1 = game.get_player('p1')
         if p1:
-            await send_setup_message(game, 'p1', p1.user_id)
-        await send_setup_message(game, 'p2', p2.user_id)
+            try:
+                await send_setup_message(game, 'p1', p1.user_id)
+            except Exception as e:
+                logger.error(f"Ошибка при отправке сообщения p1: {e}")
+        try:
+            await send_setup_message(game, 'p2', p2.user_id)
+        except Exception as e:
+            logger.error(f"Ошибка при отправке сообщения p2: {e}")
         
         # Если игра в группе, отправляем уведомление в группу
         if game.group_id:
@@ -946,6 +974,11 @@ async def cmd_start(message: Message, command: CommandStart):
                     ]
                 ])
                 
+                # Проверяем, что игра все еще существует перед отправкой в группу
+                if game_id not in games:
+                    logger.warning(f"Игра {game_id} была удалена перед отправкой уведомления в группу")
+                    return
+                
                 msg = await bot.send_message(
                     chat_id=game.group_id,
                     text=group_notification,
@@ -953,7 +986,8 @@ async def cmd_start(message: Message, command: CommandStart):
                     reply_markup=notification_keyboard if bot_username else None
                 )
                 # Сохраняем ID сообщения в группе
-                game.group_messages.append(msg.message_id)
+                if game_id in games:  # Проверяем еще раз перед сохранением
+                    game.group_messages.append(msg.message_id)
             except Exception as e:
                 # Если не удалось отправить в группу (например, бот не может отправлять сообщения),
                 # просто игнорируем ошибку
@@ -981,6 +1015,11 @@ async def callback_auto_place(callback: CallbackQuery):
         return
     
     game_id, game, player_id = existing
+    # Проверяем, что игра все еще существует
+    if game_id not in games:
+        await callback.answer("Игра была удалена", show_alert=True)
+        return
+    
     player = game.get_player(player_id)
     if not player:
         await callback.answer("Ошибка", show_alert=True)
@@ -1007,9 +1046,15 @@ async def callback_move_left(callback: CallbackQuery):
     
     existing = get_game_by_user(callback.from_user.id)
     if not existing:
+        await callback.answer("Игра не найдена", show_alert=True)
         return
     
     game_id, game, player_id = existing
+    # Проверяем, что игра все еще существует
+    if game_id not in games:
+        await callback.answer("Игра была удалена", show_alert=True)
+        return
+    
     player = game.get_player(player_id)
     if not player:
         return
@@ -1055,9 +1100,15 @@ async def callback_move_right(callback: CallbackQuery):
     
     existing = get_game_by_user(callback.from_user.id)
     if not existing:
+        await callback.answer("Игра не найдена", show_alert=True)
         return
     
     game_id, game, player_id = existing
+    # Проверяем, что игра все еще существует
+    if game_id not in games:
+        await callback.answer("Игра была удалена", show_alert=True)
+        return
+    
     player = game.get_player(player_id)
     if not player:
         return
@@ -1104,9 +1155,15 @@ async def callback_move_up(callback: CallbackQuery):
     
     existing = get_game_by_user(callback.from_user.id)
     if not existing:
+        await callback.answer("Игра не найдена", show_alert=True)
         return
     
     game_id, game, player_id = existing
+    # Проверяем, что игра все еще существует
+    if game_id not in games:
+        await callback.answer("Игра была удалена", show_alert=True)
+        return
+    
     player = game.get_player(player_id)
     if not player:
         return
@@ -1137,9 +1194,15 @@ async def callback_move_down(callback: CallbackQuery):
     
     existing = get_game_by_user(callback.from_user.id)
     if not existing:
+        await callback.answer("Игра не найдена", show_alert=True)
         return
     
     game_id, game, player_id = existing
+    # Проверяем, что игра все еще существует
+    if game_id not in games:
+        await callback.answer("Игра была удалена", show_alert=True)
+        return
+    
     player = game.get_player(player_id)
     if not player:
         return
@@ -1186,9 +1249,15 @@ async def callback_rotate(callback: CallbackQuery):
     
     existing = get_game_by_user(callback.from_user.id)
     if not existing:
+        await callback.answer("Игра не найдена", show_alert=True)
         return
     
     game_id, game, player_id = existing
+    # Проверяем, что игра все еще существует
+    if game_id not in games:
+        await callback.answer("Игра была удалена", show_alert=True)
+        return
+    
     player = game.get_player(player_id)
     if not player:
         return
@@ -1247,8 +1316,14 @@ async def callback_place_ship(callback: CallbackQuery):
         return
     
     game_id, game, player_id = existing
+    # Проверяем, что игра все еще существует
+    if game_id not in games:
+        await callback.answer("Игра была удалена", show_alert=True)
+        return
+    
     player = game.get_player(player_id)
     if not player:
+        await callback.answer("Ошибка", show_alert=True)
         return
     
     config = get_ship_config(game.mode)
@@ -1321,6 +1396,11 @@ async def callback_edit_placement(callback: CallbackQuery):
         return
     
     game_id, game, player_id = existing
+    # Проверяем, что игра все еще существует
+    if game_id not in games:
+        await callback.answer("Игра была удалена", show_alert=True)
+        return
+    
     player = game.get_player(player_id)
     if not player:
         await callback.answer("Ошибка", show_alert=True)
@@ -1352,11 +1432,18 @@ async def callback_setup_cell(callback: CallbackQuery):
     
     existing = get_game_by_user(callback.from_user.id)
     if not existing:
+        await callback.answer("Игра не найдена", show_alert=True)
         return
     
     game_id, game, player_id = existing
+    # Проверяем, что игра все еще существует
+    if game_id not in games:
+        await callback.answer("Игра была удалена", show_alert=True)
+        return
+    
     player = game.get_player(player_id)
     if not player:
+        await callback.answer("Ошибка", show_alert=True)
         return
     
     # Парсим координаты
@@ -2260,7 +2347,17 @@ async def cleanup_old_games():
             current_time = datetime.now().timestamp()
             games_to_remove = []
             
-            for game_id, game in games.items():
+            for game_id, game in list(games.items()):  # Используем list() для безопасной итерации
+                # Пропускаем активные игры (игра началась и не завершена)
+                if game.current_player and not game.winner and not game.surrendered:
+                    continue  # Не удаляем активные игры
+                
+                # Пропускаем игры, в которых оба игрока есть и игра еще не завершена (расстановка кораблей)
+                if (game.players['p1'] and game.players['p2'] and 
+                    not game.winner and not game.surrendered and not game.current_player):
+                    # Игра в процессе расстановки - не удаляем
+                    continue
+                
                 # Удаляем игры старше 24 часов
                 if current_time - game.created_at > 86400:  # 24 часа
                     games_to_remove.append(game_id)
@@ -2274,7 +2371,7 @@ async def cleanup_old_games():
                     continue
                 
                 # Удаляем завершенные игры старше 1 часа
-                if game.winner and current_time - game.created_at > 3600:
+                if (game.winner or game.surrendered) and current_time - game.created_at > 3600:
                     games_to_remove.append(game_id)
                     logger.info(f"Удалена завершенная игра {game_id}")
             

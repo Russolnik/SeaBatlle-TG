@@ -23,6 +23,9 @@ class Player:
     current_ship_row: int = 0
     current_ship_col: int = 0
     current_ship_horizontal: bool = True
+    # Последний ход противника на моем поле (координаты и был ли это промах)
+    last_enemy_move: Optional[tuple[int, int]] = None  # (row, col) последнего хода противника
+    last_enemy_move_was_miss: bool = False  # Был ли последний ход противника промахом
 
 
 @dataclass
