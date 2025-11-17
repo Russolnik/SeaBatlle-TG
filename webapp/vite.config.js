@@ -19,7 +19,7 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     assetsDir: 'assets',
-    minify: 'terser',
+    minify: 'esbuild', // Используем esbuild вместо terser (быстрее и не требует дополнительных зависимостей)
     sourcemap: false,
     rollupOptions: {
       output: {
