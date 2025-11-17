@@ -32,7 +32,7 @@ class Player:
 class GameState:
     """Состояние игры"""
     id: str
-    mode: Literal['classic', 'fast']
+    mode: Literal['classic', 'fast', 'full']
     is_timed: bool
     time_limit: int = 0  # В секундах, 0 = без таймера
     players: dict[str, Optional[Player]] = field(default_factory=lambda: {'p1': None, 'p2': None})

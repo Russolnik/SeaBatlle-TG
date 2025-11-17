@@ -6,7 +6,9 @@ from datetime import datetime
 from typing import Optional, Literal
 from threading import Thread
 
-from flask import Flask
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+from flask_socketio import SocketIO, emit, disconnect
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, BotCommand
 from aiogram.filters import Command, CommandStart
@@ -40,6 +42,8 @@ logger = logging.getLogger(__name__)
 
 # Flask приложение для веб-сервера (чтобы Render видел его как активный сервис)
 app = Flask(__name__)
+CORS(app, resources={r"/api/*": {"origins": "*"}})
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 @app.route('/')
 def index():
@@ -62,7 +66,421 @@ def health():
 def run_flask():
     """Запуск Flask сервера в отдельном потоке"""
     port = int(os.getenv("PORT", 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    socketio.run(app, host='0.0.0.0', port=port, debug=False, allow_unsafe_werkzeug=True)
+
+# ==================== API ENDPOINTS ДЛЯ WEB APP ====================
+
+def validate_telegram_init_data(init_data: str) -> Optional[dict]:
+    """Валидация initData от Telegram WebApp"""
+    try:
+        # Упрощенная валидация (для продакшена нужна полная проверка подписи)
+        import urllib.parse
+        params = urllib.parse.parse_qs(init_data)
+        if 'user' in params:
+            import json
+            user_data = json.loads(params['user'][0])
+            return user_data
+        return None
+    except Exception as e:
+        logger.error(f"Ошибка валидации initData: {e}")
+        return None
+
+@app.route('/api/auth', methods=['POST'])
+def api_auth():
+    """Авторизация через Telegram WebApp"""
+    try:
+        data = request.json
+        init_data = data.get('init_data', '')
+        user_data = data.get('user', {})
+        
+        # Валидация (упрощенная - для продакшена нужна полная проверка)
+        if not user_data or 'id' not in user_data:
+            return jsonify({'error': 'Invalid user data'}), 400
+        
+        # Генерируем простой токен (в продакшене использовать JWT)
+        token = f"token_{user_data['id']}_{uuid.uuid4().hex[:16]}"
+        
+        return jsonify({
+            'token': token,
+            'user': user_data
+        }), 200
+    except Exception as e:
+        logger.error(f"Ошибка авторизации: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/game/create', methods=['POST'])
+def api_create_game():
+    """Создать новую игру"""
+    try:
+        data = request.json
+        mode = data.get('mode', 'classic')
+        is_timed = data.get('is_timed', False)
+        user_id = data.get('user_id')  # Из токена или заголовка
+        
+        if not user_id:
+            return jsonify({'error': 'User ID required'}), 400
+        
+        game_id = str(uuid.uuid4())[:8]
+        config = get_ship_config(mode)
+        
+        game = GameState(
+            id=game_id,
+            mode=mode,
+            is_timed=is_timed,
+            group_id=None
+        )
+        
+        # Создаем первого игрока
+        p1 = Player(
+            user_id=user_id,
+            username=data.get('username', f'user_{user_id}'),
+            board=create_empty_board(config['size']),
+            attacks=create_empty_attacks(config['size'])
+        )
+        
+        game.players['p1'] = p1
+        games[game_id] = game
+        
+        return jsonify({
+            'game_id': game_id,
+            'player_id': 'p1',
+            'game_state': serialize_game_state(game, 'p1')
+        }), 200
+    except Exception as e:
+        logger.error(f"Ошибка создания игры: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/game/<game_id>/state', methods=['GET'])
+def api_get_game_state(game_id):
+    """Получить состояние игры"""
+    try:
+        player_id = request.args.get('player_id', 'p1')
+        
+        if game_id not in games:
+            return jsonify({'error': 'Game not found'}), 404
+        
+        game = games[game_id]
+        return jsonify(serialize_game_state(game, player_id)), 200
+    except Exception as e:
+        logger.error(f"Ошибка получения состояния: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/game/<game_id>/join', methods=['POST'])
+def api_join_game(game_id):
+    """Присоединиться к игре"""
+    try:
+        data = request.json
+        user_id = data.get('user_id')
+        
+        if not user_id:
+            return jsonify({'error': 'User ID required'}), 400
+        
+        if game_id not in games:
+            return jsonify({'error': 'Game not found'}), 404
+        
+        game = games[game_id]
+        
+        if game.players['p2']:
+            return jsonify({'error': 'Game is full'}), 400
+        
+        config = get_ship_config(game.mode)
+        p2 = Player(
+            user_id=user_id,
+            username=data.get('username', f'user_{user_id}'),
+            board=create_empty_board(config['size']),
+            attacks=create_empty_attacks(config['size'])
+        )
+        
+        game.players['p2'] = p2
+        
+        # Уведомляем через WebSocket
+        socketio.emit('game_state', serialize_game_state(game, 'p1'), room=f'game_{game_id}')
+        socketio.emit('game_state', serialize_game_state(game, 'p2'), room=f'game_{game_id}')
+        
+        return jsonify({
+            'player_id': 'p2',
+            'game_state': serialize_game_state(game, 'p2')
+        }), 200
+    except Exception as e:
+        logger.error(f"Ошибка присоединения: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/game/<game_id>/attack', methods=['POST'])
+def api_attack(game_id):
+    """Атаковать клетку"""
+    try:
+        data = request.json
+        row = data.get('row')
+        col = data.get('col')
+        player_id = data.get('player_id', 'p1')
+        
+        if game_id not in games:
+            return jsonify({'error': 'Game not found'}), 404
+        
+        game = games[game_id]
+        
+        # Определяем фазу игры
+        phase = 'lobby'
+        if game.players['p1'] and game.players['p2']:
+            if game.players['p1'].ready and game.players['p2'].ready:
+                phase = 'battle'
+            else:
+                phase = 'setup'
+        
+        if phase != 'battle':
+            return jsonify({'error': 'Game not in battle phase'}), 400
+        
+        if game.current_player != player_id:
+            return jsonify({'error': 'Not your turn'}), 400
+        
+        result = attack_cell(game, player_id, row, col)
+        
+        if 'error' in result:
+            return jsonify({'error': result['error']}), 400
+        
+        # Обновляем время последнего хода
+        game.last_move_time = datetime.now().timestamp()
+        
+        # Проверяем окончание игры
+        if game.winner:
+            end_game(game)
+        
+        # Уведомляем через WebSocket
+        socketio.emit('move', {
+            'player_id': player_id,
+            'row': row,
+            'col': col,
+            'result': result
+        }, room=f'game_{game_id}')
+        socketio.emit('game_state', serialize_game_state(game, 'p1'), room=f'game_{game_id}')
+        socketio.emit('game_state', serialize_game_state(game, 'p2'), room=f'game_{game_id}')
+        
+        return jsonify({
+            'result': result,
+            'game_state': serialize_game_state(game, player_id)
+        }), 200
+    except Exception as e:
+        logger.error(f"Ошибка атаки: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/game/<game_id>/place-ship', methods=['POST'])
+def api_place_ship(game_id):
+    """Разместить корабль"""
+    try:
+        data = request.json
+        size = data.get('size')
+        row = data.get('row')
+        col = data.get('col')
+        horizontal = data.get('horizontal', True)
+        player_id = data.get('player_id', 'p1')
+        
+        if game_id not in games:
+            return jsonify({'error': 'Game not found'}), 404
+        
+        game = games[game_id]
+        player = game.get_player(player_id)
+        
+        if not player:
+            return jsonify({'error': 'Player not found'}), 400
+        
+        config = get_ship_config(game.mode)
+        
+        # Валидация размещения
+        if not validate_ship_placement(player.board, player.ships, size, row, col, horizontal, config['size']):
+            return jsonify({'error': 'Invalid ship placement'}), 400
+        
+        # Размещаем корабль
+        place_ship(player.board, player.ships, size, row, col, horizontal)
+        
+        # Проверяем, все ли корабли размещены
+        required_ships_list = config['ships']  # Это список размеров
+        required_ships_dict = {}
+        for size in required_ships_list:
+            required_ships_dict[size] = required_ships_dict.get(size, 0) + 1
+        
+        placed_ships = {}
+        for ship in player.ships:
+            placed_ships[ship['size']] = placed_ships.get(ship['size'], 0) + 1
+        
+        all_placed = all(
+            placed_ships.get(size, 0) >= count
+            for size, count in required_ships_dict.items()
+        )
+        
+        if all_placed:
+            player.ready = True
+            
+            # Если оба игрока готовы, начинаем бой
+            if game.players['p1'] and game.players['p1'].ready and \
+               game.players['p2'] and game.players['p2'].ready:
+                game.current_player = 'p1'
+                game.phase = 'battle'
+        
+        # Уведомляем через WebSocket
+        socketio.emit('game_state', serialize_game_state(game, 'p1'), room=f'game_{game_id}')
+        socketio.emit('game_state', serialize_game_state(game, 'p2'), room=f'game_{game_id}')
+        
+        return jsonify({
+            'game_state': serialize_game_state(game, player_id)
+        }), 200
+    except Exception as e:
+        logger.error(f"Ошибка размещения корабля: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/game/<game_id>/auto-place', methods=['POST'])
+def api_auto_place(game_id):
+    """Автоматическая расстановка кораблей"""
+    try:
+        player_id = request.json.get('player_id', 'p1')
+        
+        if game_id not in games:
+            return jsonify({'error': 'Game not found'}), 404
+        
+        game = games[game_id]
+        player = game.get_player(player_id)
+        
+        if not player:
+            return jsonify({'error': 'Player not found'}), 400
+        
+        config = get_ship_config(game.mode)
+        
+        # Автоматическая расстановка
+        auto_place_ships(player.board, player.ships, config)
+        player.ready = True
+        
+        # Если оба игрока готовы, начинаем бой
+        if game.players['p1'] and game.players['p1'].ready and \
+           game.players['p2'] and game.players['p2'].ready:
+            game.current_player = 'p1'
+        
+        # Уведомляем через WebSocket
+        socketio.emit('game_state', serialize_game_state(game, 'p1'), room=f'game_{game_id}')
+        socketio.emit('game_state', serialize_game_state(game, 'p2'), room=f'game_{game_id}')
+        
+        return jsonify({
+            'game_state': serialize_game_state(game, player_id)
+        }), 200
+    except Exception as e:
+        logger.error(f"Ошибка авто-расстановки: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/game/<game_id>/surrender', methods=['POST'])
+def api_surrender(game_id):
+    """Сдаться"""
+    try:
+        player_id = request.json.get('player_id', 'p1')
+        
+        if game_id not in games:
+            return jsonify({'error': 'Game not found'}), 404
+        
+        game = games[game_id]
+        game.surrendered = True
+        game.winner = 'p2' if player_id == 'p1' else 'p1'
+        
+        end_game(game)
+        
+        return jsonify({
+            'game_state': serialize_game_state(game, player_id)
+        }), 200
+    except Exception as e:
+        logger.error(f"Ошибка сдачи: {e}")
+        return jsonify({'error': str(e)}), 500
+
+def serialize_game_state(game: GameState, player_id: str) -> dict:
+    """Сериализация состояния игры для API"""
+    player = game.get_player(player_id)
+    opponent_id = 'p2' if player_id == 'p1' else 'p1'
+    opponent = game.get_player(opponent_id)
+    
+    config = get_ship_config(game.mode)
+    
+    # Определяем фазу игры
+    phase = 'lobby'
+    if game.players['p1'] and game.players['p2']:
+        if player and player.ready and opponent and opponent.ready:
+            phase = 'battle'
+        else:
+            phase = 'setup'
+    
+    # Корабли для размещения (для фазы setup)
+    ships_to_place = []
+    if phase == 'setup' and player:
+        # config['ships'] это список размеров, нужно преобразовать в словарь
+        required_ships_list = config['ships']
+        required_ships_dict = {}
+        for size in required_ships_list:
+            required_ships_dict[size] = required_ships_dict.get(size, 0) + 1
+        
+        placed_ships = {}
+        for ship in player.ships:
+            placed_ships[ship['size']] = placed_ships.get(ship['size'], 0) + 1
+        
+        for size, count in required_ships_dict.items():
+            placed = placed_ships.get(size, 0)
+            if placed < count:
+                ships_to_place.append({
+                    'size': size,
+                    'count': count - placed
+                })
+    
+    return {
+        'id': game.id,
+        'phase': phase,
+        'mode': game.mode,
+        'is_timed': game.is_timed,
+        'current_player': game.current_player,
+        'player_id': player_id,
+        'config': {
+            'size': config['size'],
+            'ships': config['ships']  # Это список размеров кораблей
+        },
+        'players': {
+            player_id: {
+                'user_id': player.user_id if player else None,
+                'username': player.username if player else None,
+                'board': player.board if player else None,
+                'attacks': player.attacks if player else None,
+                'ships_remaining': get_remaining_ships(player) if player else 0,
+                'ready': player.ready if player else False
+            },
+            opponent_id: {
+                'user_id': opponent.user_id if opponent else None,
+                'username': opponent.username if opponent else None,
+                'ships_remaining': get_remaining_ships(opponent) if opponent else 0,
+                'ready': opponent.ready if opponent else False
+            }
+        },
+        'ships_to_place': ships_to_place,
+        'winner': game.winner,
+        'surrendered': game.surrendered,
+        'last_move': game.last_move_info,
+        'time_remaining': None  # TODO: вычислить оставшееся время
+    }
+
+# ==================== WEBSOCKET HANDLERS ====================
+
+@socketio.on('connect')
+def handle_connect(auth):
+    """Обработка подключения WebSocket"""
+    try:
+        game_id = request.args.get('game_id')
+        if game_id:
+            from flask_socketio import join_room
+            join_room(f'game_{game_id}')
+            logger.info(f"WebSocket подключен к игре {game_id}")
+    except Exception as e:
+        logger.error(f"Ошибка подключения WebSocket: {e}")
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    """Обработка отключения WebSocket"""
+    logger.info("WebSocket отключен")
+
+@socketio.on('attack')
+def handle_attack(data):
+    """Обработка атаки через WebSocket"""
+    # Логика уже обрабатывается в API endpoint
+    pass
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
@@ -551,7 +969,23 @@ async def cmd_play(message: Message):
         text += f"Режим: Обычный (8×8) или Быстрый (6×6)\n"
         text += f"Выберите режим:"
     
-    msg = await message.answer(text, reply_markup=get_mode_keyboard(game.mode, game.is_timed if game.is_timed else None))
+    # Получаем URL для Mini App (из переменной окружения или используем дефолтный)
+    webapp_url = os.getenv("WEBAPP_URL", "https://your-webapp-domain.com")
+    
+    # Создаем клавиатуру с выбором режима и кнопкой Mini App
+    from aiogram.types import InlineKeyboardButton, WebAppInfo
+    mode_keyboard = get_mode_keyboard(game.mode, game.is_timed if game.is_timed else None)
+    
+    # Добавляем кнопку Mini App
+    if mode_keyboard.inline_keyboard:
+        mode_keyboard.inline_keyboard.append([
+            InlineKeyboardButton(
+                text="🌐 Играть в веб-версии",
+                web_app=WebAppInfo(url=f"{webapp_url}?gameId={game_id}&mode=classic")
+            )
+        ])
+    
+    msg = await message.answer(text, reply_markup=mode_keyboard)
     game.setup_message_id = msg.message_id
     
     # Удаляем сообщение команды

@@ -48,3 +48,5 @@ Thumbs.db
 *.db
 *.sqlite
 
+# Webapp - node_modules и build файлы игнорируются через webapp/.gitignore
+
