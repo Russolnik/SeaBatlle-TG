@@ -52,12 +52,18 @@ function App() {
 
     socket.on('game_state', (state) => {
       if (state) {
+        // Сохраняем позицию скролла перед обновлением
+        const scrollY = window.scrollY
         setGameState(state)
         // Сохраняем gameId при обновлении
         if (state.id) {
           setGameId(state.id)
           localStorage.setItem('activeGameId', state.id)
         }
+        // Восстанавливаем позицию скролла после обновления
+        requestAnimationFrame(() => {
+          window.scrollTo(0, scrollY)
+        })
       }
     })
 

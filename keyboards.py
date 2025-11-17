@@ -3,9 +3,10 @@ from typing import Literal, Optional
 from game_logic import get_ship_config, GAME_MODES
 
 
-def get_mode_keyboard(mode: Optional[Literal['classic', 'fast']] = None, is_timed: Optional[bool] = None) -> InlineKeyboardMarkup:
+def get_mode_keyboard(mode: Optional[Literal['classic', 'fast', 'full']] = None, is_timed: Optional[bool] = None) -> InlineKeyboardMarkup:
     """Клавиатура выбора режима игры"""
     # Текст для режимов с галочками
+    full_text = "✅ Полный (10×10)" if mode == 'full' else "Полный (10×10)"
     classic_text = "✅ Обычный (8×8)" if mode == 'classic' else "Обычный (8×8)"
     fast_text = "✅ Быстрый (6×6)" if mode == 'fast' else "Быстрый (6×6)"
     
@@ -15,7 +16,10 @@ def get_mode_keyboard(mode: Optional[Literal['classic', 'fast']] = None, is_time
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text=classic_text, callback_data="mode_classic"),
+            InlineKeyboardButton(text=full_text, callback_data="mode_full"),
+            InlineKeyboardButton(text=classic_text, callback_data="mode_classic")
+        ],
+        [
             InlineKeyboardButton(text=fast_text, callback_data="mode_fast")
         ],
         [

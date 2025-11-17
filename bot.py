@@ -770,8 +770,8 @@ def format_board_text(board: list[list[str]], size: int) -> str:
     return text
 
 
-async def send_setup_message(game: GameState, player_id: str, chat_id: int, show_miniapp: bool = False):
-    """Отправить сообщение с расстановкой кораблей"""
+async def send_setup_message(game: GameState, player_id: str, chat_id: int, show_miniapp: bool = True):
+    """Отправить сообщение с расстановкой кораблей - только кнопка Mini App"""
     # Проверяем, что игра все еще существует
     if game.id not in games:
         logger.warning(f"Попытка отправить сообщение для удаленной игры {game.id}")
@@ -793,80 +793,29 @@ async def send_setup_message(game: GameState, player_id: str, chat_id: int, show
         opponent_info = f"\n👤 Противник: @{opponent.username} ({opponent_status})"
 
     if placed_ships < len(ships):
-        # Определяем правильный размер корабля для размещения
-        expected_ships = ships.copy()
-        placed_ships_list = [ship['size'] for ship in player.ships]
-        
-        # Находим первый корабль из ожидаемых, которого еще нет
-        ship_size = None
-        ship_index = 0
-        for i, expected_size in enumerate(expected_ships):
-            placed_count = placed_ships_list.count(expected_size)
-            expected_count = expected_ships.count(expected_size)
-            if placed_count < expected_count:
-                ship_size = expected_size
-                ship_index = i
-                break
-        
-        if ship_size is None:
-            ship_size = ships[placed_ships]
-            ship_index = placed_ships
-        
         text = f"⚓ Расстановка кораблей{opponent_info}\n\n"
-        text += f"Разместите {ship_size}-палубный корабль ({placed_ships + 1}/{len(ships)})\n"
-        text += f"Используйте кнопки для перемещения и поворота"
-
-        keyboard = get_setup_keyboard(
-            player.board,
-            game.mode,
-            player.current_ship_row,
-            player.current_ship_col,
-            player.current_ship_horizontal,
-            ship_index,
-            show_preview=True,
-            is_p2=(player_id == 'p2')
-        )
-        
-        # Добавляем кнопку Mini App если нужно
-        if show_miniapp:
-            from aiogram.types import InlineKeyboardButton, WebAppInfo
-            webapp_url = os.getenv("WEBAPP_URL", "https://seabatl.netlify.app")
-            # Получаем username бота
-            bot_info = await get_bot_info()
-            if keyboard.inline_keyboard:
-                keyboard.inline_keyboard.append([
-                    InlineKeyboardButton(
-                        text="🌐 Открыть Mini App",
-                        web_app=WebAppInfo(url=f"{webapp_url}?gameId={game.id}&mode={game.mode}&bot={bot_info['username']}")
-                    )
-                ])
+        text += f"Разместите корабли для начала игры\n"
+        text += f"Прогресс: {placed_ships}/{len(ships)} кораблей"
     else:
         player_status = "✅ Вы готовы" if player.ready else "⏳ Ожидание"
         text = f"✅ Все корабли расставлены!{opponent_info}\n\n"
         text += f"Статус: {player_status}\n"
         if not player.ready:
-            text += f"Нажмите 'Готово', когда будете готовы начать бой."
+            text += f"Нажмите 'Готово' в Mini App, когда будете готовы начать бой."
 
-        keyboard = get_setup_keyboard(
-            player.board,
-            game.mode,
-            show_preview=False,
-            is_p2=(player_id == 'p2')
-        )
-        
-        # Добавляем кнопку Mini App если нужно
-        if show_miniapp:
-            from aiogram.types import InlineKeyboardButton, WebAppInfo
-            webapp_url = os.getenv("WEBAPP_URL", "https://seabatl.netlify.app")
-            # Получаем username бота
-            bot_info = await get_bot_info()
-            if keyboard.inline_keyboard:
-                keyboard.inline_keyboard.append([
-                    InlineKeyboardButton(
-                        text="🌐 Открыть Mini App",
-                        web_app=WebAppInfo(url=f"{webapp_url}?gameId={game.id}&mode={game.mode}&bot={bot_info['username']}")
-                    )
-                ])
+    # Создаем клавиатуру только с кнопкой Mini App
+    from aiogram.types import InlineKeyboardButton, WebAppInfo, InlineKeyboardMarkup
+    webapp_url = os.getenv("WEBAPP_URL", "https://seabatl.netlify.app")
+    bot_info = await get_bot_info()
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="🎮 Открыть приложение",
+                web_app=WebAppInfo(url=f"{webapp_url}?gameId={game.id}&mode={game.mode}&bot={bot_info['username']}")
+            )
+        ]
+    ])
 
     # Всегда пытаемся обновить существующее сообщение
     if player.setup_message_id:
@@ -895,7 +844,7 @@ async def send_setup_message(game: GameState, player_id: str, chat_id: int, show
 
 
 async def send_battle_message(game: GameState, player_id: str, chat_id: int):
-    """Отправить сообщения с боем (2 сообщения: мое поле и поле врага)"""
+    """Отправить сообщение с боем - только кнопка Mini App"""
     # Проверяем, что игра все еще существует
     if game.id not in games:
         logger.warning(f"Попытка отправить сообщение боя для удаленной игры {game.id}")
@@ -907,7 +856,6 @@ async def send_battle_message(game: GameState, player_id: str, chat_id: int):
         return
     
     is_my_turn = game.current_player == player_id
-    config = get_ship_config(game.mode)
     
     # Эмодзи для хода
     turn_emoji = "👉" if is_my_turn else "⏰"
@@ -925,125 +873,49 @@ async def send_battle_message(game: GameState, player_id: str, chat_id: int):
         seconds = remaining % 60
         timer_text = f"\n⏱ Осталось: {minutes}:{seconds:02d}"
     
-    # Создаем копию своего поля для отображения атак противника
-    # Показываем ВСЕ ходы противника: корабли, попадания (🔥, ❌), и мимо (⚫)
-    # Последний ход противника (если промах) подсвечиваем зеленым кружком (🟢)
-    display_board = []
-    for r in range(config['size']):
-        row = []
-        for c in range(config['size']):
-            cell = player.board[r][c]
-            # Проверяем, является ли это последним ходом противника (промах)
-            if (player.last_enemy_move and player.last_enemy_move_was_miss and 
-                player.last_enemy_move == (r, c) and cell == '⚫'):
-                # Подсвечиваем последний ход противника зеленым кружком
-                row.append('🟢')
-            # Если это корабль, показываем его
-            elif cell == '🟥':
-                row.append('🟥')
-            # Если это попадание, уничтоженный корабль или мимо, показываем
-            elif cell in ['🔥', '❌', '⚫']:
-                row.append(cell)
-            else:
-                # Море или другое
-                row.append('🌊')
-        display_board.append(row)
-    
-    # Сообщение с моим полем (сверху)
-    my_text = f"🎮 Игра с @{opponent.username}\n\n"
-    my_text += f"👥 Игроки: @{player.username} vs @{opponent.username}\n"
-    my_text += f"⏱ Режим: {'с таймером' if game.is_timed else 'без таймера'}{timer_text}\n"
-    my_text += f"{turn_text}\n\n"
-    my_text += f"📍 ВАШЕ ПОЛЕ:"
-    
-    my_keyboard = get_battle_keyboard_my(display_board, game.mode)
-    
-    # Информационное табло (посередине)
-    info_text = "📊 ИНФОРМАЦИОННОЕ ТАБЛО\n\n"
-    
-    # Чей ход
-    current_player_name = player.username if is_my_turn else opponent.username
-    info_text += f"👉 Ход: @{current_player_name}\n"
-    
-    # Таймер (если есть)
-    if game.is_timed and game.last_move_time:
-        elapsed = datetime.now().timestamp() - game.last_move_time
-        remaining = max(0, game.time_limit - int(elapsed))
-        minutes = remaining // 60
-        seconds = remaining % 60
-        info_text += f"⏱ Время: {minutes}:{seconds:02d}\n"
-    
-    info_text += "\n"
+    # Информационное сообщение
+    text = f"🎮 Игра с @{opponent.username}\n\n"
+    text += f"👥 Игроки: @{player.username} vs @{opponent.username}\n"
+    text += f"⏱ Режим: {'с таймером' if game.is_timed else 'без таймера'}{timer_text}\n"
+    text += f"{turn_text}\n\n"
     
     # Последний ход
     if game.last_move_info:
-        info_text += f"Последний ход: {game.last_move_info}\n"
-    else:
-        info_text += "Ожидание первого хода...\n"
+        text += f"Последний ход: {game.last_move_info}\n"
     
-    info_text += f"\n✅ Ваши корабли: {get_remaining_ships(player)}\n"
-    info_text += f"🎯 Корабли противника: {get_remaining_ships(opponent)}"
+    text += f"\n✅ Ваши корабли: {get_remaining_ships(player)}\n"
+    text += f"🎯 Корабли противника: {get_remaining_ships(opponent)}\n\n"
+    text += f"Играйте в Mini App!"
     
-    # Сообщение с полем врага (снизу)
-    enemy_text = f"🎯 ПОЛЕ ПРОТИВНИКА:"
-    enemy_keyboard = get_battle_keyboard_enemy(player.attacks, game.mode, is_my_turn)
+    # Создаем клавиатуру только с кнопкой Mini App
+    from aiogram.types import InlineKeyboardButton, WebAppInfo, InlineKeyboardMarkup
+    webapp_url = os.getenv("WEBAPP_URL", "https://seabatl.netlify.app")
+    bot_info = await get_bot_info()
     
-    # ВСЕГДА обновляем существующие сообщения, НИКОГДА не создаем новые
-    # Сообщение с моим полем
-    if player.my_board_message_id:
-        try:
-            await bot.edit_message_text(
-                text=my_text,
-                chat_id=chat_id,
-                message_id=player.my_board_message_id,
-                reply_markup=my_keyboard
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="🎮 Открыть приложение",
+                web_app=WebAppInfo(url=f"{webapp_url}?gameId={game.id}&mode={game.mode}&bot={bot_info['username']}")
             )
-        except Exception:
-            # Если не удалось обновить, просто игнорируем (не создаем новое!)
-            pass
-    else:
-        # Только если сообщения вообще нет, создаем его один раз
-        try:
-            msg = await bot.send_message(chat_id=chat_id, text=my_text, reply_markup=my_keyboard)
-            player.my_board_message_id = msg.message_id
-        except Exception:
-            pass
+        ]
+    ])
     
-    # Информационное табло (посередине)
-    if player.info_message_id:
+    # Обновляем или создаем сообщение
+    if player.battle_message_id:
         try:
             await bot.edit_message_text(
-                text=info_text,
+                text=text,
                 chat_id=chat_id,
-                message_id=player.info_message_id
+                message_id=player.battle_message_id,
+                reply_markup=keyboard
             )
         except Exception:
             pass
     else:
-        # Только если сообщения вообще нет, создаем его один раз
         try:
-            msg = await bot.send_message(chat_id=chat_id, text=info_text)
-            player.info_message_id = msg.message_id
-        except Exception:
-            pass
-    
-    # Сообщение с полем врага
-    if player.enemy_board_message_id:
-        try:
-            await bot.edit_message_text(
-                text=enemy_text,
-                chat_id=chat_id,
-                message_id=player.enemy_board_message_id,
-                reply_markup=enemy_keyboard
-            )
-        except Exception:
-            # Если не удалось обновить, просто игнорируем (не создаем новое!)
-            pass
-    else:
-        # Только если сообщения вообще нет, создаем его один раз
-        try:
-            msg = await bot.send_message(chat_id=chat_id, text=enemy_text, reply_markup=enemy_keyboard)
-            player.enemy_board_message_id = msg.message_id
+            msg = await bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard)
+            player.battle_message_id = msg.message_id
         except Exception:
             pass
 
@@ -1427,8 +1299,13 @@ async def callback_mode(callback: CallbackQuery):
         return
     
     # Показываем выбор таймера
+    mode_names = {
+        'full': 'Полный (10×10)',
+        'classic': 'Обычный (8×8)',
+        'fast': 'Быстрый (6×6)'
+    }
     text = f"🎮 Игра создана!\n\n"
-    text += f"Режим: {'Обычный (8×8)' if mode == 'classic' else 'Быстрый (6×6)'}\n"
+    text += f"Режим: {mode_names.get(mode, mode)}\n"
     text += f"Выберите таймер:"
     
     # Обновляем существующее сообщение

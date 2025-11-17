@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Board from './Board'
 import GameInfo from './GameInfo'
 import { api } from '../utils/api'
@@ -6,12 +6,23 @@ import { api } from '../utils/api'
 export default function GameBoard({ gameState, playerId, onStateUpdate, socket }) {
   const [isMyTurn, setIsMyTurn] = useState(false)
   const [attacking, setAttacking] = useState(false)
+  const containerRef = useRef(null)
 
   useEffect(() => {
     if (gameState) {
       setIsMyTurn(gameState.current_player === playerId)
     }
   }, [gameState, playerId])
+
+  // Предотвращаем скролл наверх при обновлении
+  useEffect(() => {
+    if (containerRef.current) {
+      const scrollY = window.scrollY
+      requestAnimationFrame(() => {
+        window.scrollTo(0, scrollY)
+      })
+    }
+  }, [gameState])
 
   if (!gameState || !playerId || !gameState.players) {
     return <div className="flex items-center justify-center min-h-screen">Загрузка...</div>
@@ -68,33 +79,43 @@ export default function GameBoard({ gameState, playerId, onStateUpdate, socket }
   }
 
   return (
-    <div className="min-h-screen p-4 pb-20">
+    <div ref={containerRef} className="min-h-screen p-4 pb-20 bg-gradient-to-b from-blue-50 to-blue-100 dark:from-gray-900 dark:to-gray-800">
       <div className="max-w-4xl mx-auto">
         <GameInfo gameState={gameState} playerId={playerId} isMyTurn={isMyTurn} />
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-          <div>
-            <h2 className="text-lg font-bold mb-2 text-center">Ваше поле</h2>
-            <Board
-              board={myPlayer.board}
-              size={gameState.config?.size || 10}
-              showShips={true}
-            />
-          </div>
-
-          <div>
-            <h2 className="text-lg font-bold mb-2 text-center">Поле противника</h2>
-            <Board
-              board={myPlayer.attacks}
-              size={gameState.config?.size || 10}
-              interactive={isMyTurn && !attacking}
-              onCellClick={handleAttack}
-            />
+        <div className="grid grid-cols-1 gap-6 mt-4">
+          {/* Поле противника - СВЕРХУ */}
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-4">
+            <h2 className="text-xl font-bold mb-3 text-center text-gray-800 dark:text-gray-200">
+              🎯 Поле противника
+            </h2>
+            <div className="flex justify-center">
+              <Board
+                board={myPlayer.attacks}
+                size={gameState.config?.size || 10}
+                interactive={isMyTurn && !attacking}
+                onCellClick={handleAttack}
+              />
+            </div>
             {attacking && (
-              <div className="text-center mt-2 text-blue-600 dark:text-blue-400 text-sm">
-                Атака...
+              <div className="text-center mt-3 text-blue-600 dark:text-blue-400 text-sm font-medium">
+                ⚡ Атака...
               </div>
             )}
+          </div>
+
+          {/* Ваше поле - СНИЗУ */}
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-4">
+            <h2 className="text-xl font-bold mb-3 text-center text-gray-800 dark:text-gray-200">
+              📍 Ваше поле
+            </h2>
+            <div className="flex justify-center">
+              <Board
+                board={myPlayer.board}
+                size={gameState.config?.size || 10}
+                showShips={true}
+              />
+            </div>
           </div>
         </div>
 
@@ -102,7 +123,7 @@ export default function GameBoard({ gameState, playerId, onStateUpdate, socket }
           <button
             onClick={handleSurrender}
             disabled={attacking}
-            className="px-6 py-3 bg-red-500 text-white rounded-lg hover:bg-red-600 disabled:opacity-50"
+            className="px-8 py-3 bg-red-500 text-white rounded-xl hover:bg-red-600 disabled:opacity-50 shadow-lg font-semibold transition-all"
           >
             🚩 Сдаться
           </button>
