@@ -47,34 +47,84 @@ app = Flask(__name__)
 # Получаем URL бэкенда из переменных окружения
 BACKEND_URL = os.getenv("BACKEND_URL", "https://seabatlle-tg.onrender.com")
 
-allowed_origins = [
+# Собираем список разрешенных origins
+allowed_origins_list = [
     BACKEND_URL,  # Разрешаем запросы с самого бэкенда
     "http://localhost:3000",
     "http://localhost:5173",  # Vite dev server
-    "https://*.netlify.app",  # Netlify деплои
-    "https://*.vercel.app",   # Vercel деплои (на будущее)
+    "https://seabatl.netlify.app",  # Конкретный Netlify домен
 ]
 
-# Получаем URL веб-приложения из переменных окружения
+# Добавляем домены из переменных окружения
 webapp_url = os.getenv("WEBAPP_URL", "")
 if webapp_url:
-    allowed_origins.append(webapp_url)
-    # Также добавляем без протокола для гибкости
-    if webapp_url.startswith("https://"):
-        allowed_origins.append(webapp_url.replace("https://", "http://"))
+    allowed_origins_list.append(webapp_url)
 
-CORS(app, resources={
-    r"/api/*": {
-        "origins": allowed_origins,
-        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization"],
-        "credentials": True
-    }
-})
+# Flask-CORS не поддерживает функции напрямую, используем список
+# Для поддержки wildcard доменов используем более широкий подход
+# В продакшене можно добавить конкретные домены через переменные окружения
+
+# Функция для проверки origin
+def is_origin_allowed(origin):
+    """Проверка, разрешен ли origin"""
+    if not origin:
+        return False
+    
+    # Разрешаем localhost для разработки
+    if origin.startswith('http://localhost'):
+        return True
+    
+    # Разрешаем конкретные домены
+    if origin in allowed_origins_list:
+        return True
+    
+    # Разрешаем Netlify домены
+    if '.netlify.app' in origin and origin.startswith('https://'):
+        return True
+    
+    # Разрешаем Vercel домены
+    if '.vercel.app' in origin and origin.startswith('https://'):
+        return True
+    
+    return False
+
+# Настройка CORS
+CORS(app, 
+     resources={
+         r"/api/*": {
+             "origins": "*",  # Временно разрешаем все для отладки
+             "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+             "allow_headers": ["Content-Type", "Authorization", "X-Requested-With"],
+             "expose_headers": ["Content-Type"],
+             "max_age": 3600
+         }
+     })
+
+# Добавляем обработчик для добавления CORS заголовков вручную
+@app.after_request
+def after_request(response):
+    """Добавляем CORS заголовки к каждому ответу"""
+    origin = request.headers.get('Origin', '')
+    
+    # Проверяем origin
+    if is_origin_allowed(origin) or not origin:
+        response.headers.add('Access-Control-Allow-Origin', origin if origin else '*')
+        response.headers.add('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With')
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        response.headers.add('Access-Control-Max-Age', '3600')
+    else:
+        # Если origin не разрешен, все равно добавляем заголовки для отладки
+        response.headers.add('Access-Control-Allow-Origin', origin)
+        response.headers.add('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With')
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+    
+    return response
 
 socketio = SocketIO(
     app,
-    cors_allowed_origins=allowed_origins,
+    cors_allowed_origins="*",  # Разрешаем все origins для WebSocket (можно ограничить позже)
     async_mode='threading',
     logger=True,
     engineio_logger=True
@@ -120,9 +170,20 @@ def validate_telegram_init_data(init_data: str) -> Optional[dict]:
         logger.error(f"Ошибка валидации initData: {e}")
         return None
 
-@app.route('/api/auth', methods=['POST'])
+@app.route('/api/auth', methods=['POST', 'OPTIONS'])
 def api_auth():
     """Авторизация через Telegram WebApp"""
+    if request.method == 'OPTIONS':
+        # Обработка preflight запроса
+        origin = request.headers.get('Origin', '*')
+        response = jsonify({})
+        response.headers.add('Access-Control-Allow-Origin', origin)
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With')
+        response.headers.add('Access-Control-Allow-Methods', 'POST, OPTIONS')
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        response.headers.add('Access-Control-Max-Age', '3600')
+        return response, 200
+    
     try:
         data = request.json
         init_data = data.get('init_data', '')
@@ -130,18 +191,25 @@ def api_auth():
         
         # Валидация (упрощенная - для продакшена нужна полная проверка)
         if not user_data or 'id' not in user_data:
-            return jsonify({'error': 'Invalid user data'}), 400
+            response = jsonify({'error': 'Invalid user data'})
+            response.headers.add('Access-Control-Allow-Origin', request.headers.get('Origin', '*'))
+            return response, 400
         
         # Генерируем простой токен (в продакшене использовать JWT)
         token = f"token_{user_data['id']}_{uuid.uuid4().hex[:16]}"
         
-        return jsonify({
+        result = jsonify({
             'token': token,
             'user': user_data
-        }), 200
+        })
+        result.headers.add('Access-Control-Allow-Origin', request.headers.get('Origin', '*'))
+        result.headers.add('Access-Control-Allow-Credentials', 'true')
+        return result, 200
     except Exception as e:
         logger.error(f"Ошибка авторизации: {e}")
-        return jsonify({'error': str(e)}), 500
+        response = jsonify({'error': str(e)})
+        response.headers.add('Access-Control-Allow-Origin', request.headers.get('Origin', '*'))
+        return response, 500
 
 @app.route('/api/game/create', methods=['POST'])
 def api_create_game():
@@ -185,20 +253,36 @@ def api_create_game():
         logger.error(f"Ошибка создания игры: {e}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/game/<game_id>/state', methods=['GET'])
+@app.route('/api/game/<game_id>/state', methods=['GET', 'OPTIONS'])
 def api_get_game_state(game_id):
     """Получить состояние игры"""
+    if request.method == 'OPTIONS':
+        origin = request.headers.get('Origin', '*')
+        response = jsonify({})
+        response.headers.add('Access-Control-Allow-Origin', origin)
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+        response.headers.add('Access-Control-Allow-Methods', 'GET, OPTIONS')
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        return response, 200
+    
     try:
         player_id = request.args.get('player_id', 'p1')
         
         if game_id not in games:
-            return jsonify({'error': 'Game not found'}), 404
+            response = jsonify({'error': 'Game not found'})
+            response.headers.add('Access-Control-Allow-Origin', request.headers.get('Origin', '*'))
+            return response, 404
         
         game = games[game_id]
-        return jsonify(serialize_game_state(game, player_id)), 200
+        result = jsonify(serialize_game_state(game, player_id))
+        result.headers.add('Access-Control-Allow-Origin', request.headers.get('Origin', '*'))
+        result.headers.add('Access-Control-Allow-Credentials', 'true')
+        return result, 200
     except Exception as e:
         logger.error(f"Ошибка получения состояния: {e}")
-        return jsonify({'error': str(e)}), 500
+        response = jsonify({'error': str(e)})
+        response.headers.add('Access-Control-Allow-Origin', request.headers.get('Origin', '*'))
+        return response, 500
 
 @app.route('/api/game/<game_id>/join', methods=['POST'])
 def api_join_game(game_id):
