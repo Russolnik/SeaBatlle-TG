@@ -463,10 +463,14 @@ def api_auto_place(game_id):
             return jsonify({'error': 'Player not found'}), 400
         
         # Автоматическая расстановка - функция возвращает (board, ships)
-        board, ships = auto_place_ships(game.mode)
-        player.board = board
-        player.ships = ships
-        player.ready = True
+        try:
+            board, ships = auto_place_ships(game.mode)
+            player.board = board
+            player.ships = ships
+            player.ready = True
+        except Exception as e:
+            logger.error(f"Ошибка в auto_place_ships для режима {game.mode}: {e}", exc_info=True)
+            raise
         
         # Если оба игрока готовы, начинаем бой
         if game.players['p1'] and game.players['p1'].ready and \
@@ -685,7 +689,7 @@ def format_board_text(board: list[list[str]], size: int) -> str:
     return text
 
 
-async def send_setup_message(game: GameState, player_id: str, chat_id: int):
+async def send_setup_message(game: GameState, player_id: str, chat_id: int, show_miniapp: bool = False):
     """Отправить сообщение с расстановкой кораблей"""
     # Проверяем, что игра все еще существует
     if game.id not in games:
@@ -741,6 +745,18 @@ async def send_setup_message(game: GameState, player_id: str, chat_id: int):
             show_preview=True,
             is_p2=(player_id == 'p2')
         )
+        
+        # Добавляем кнопку Mini App если нужно
+        if show_miniapp:
+            from aiogram.types import InlineKeyboardButton, WebAppInfo
+            webapp_url = os.getenv("WEBAPP_URL", "https://seabatl.netlify.app")
+            if keyboard.inline_keyboard:
+                keyboard.inline_keyboard.append([
+                    InlineKeyboardButton(
+                        text="🌐 Открыть Mini App",
+                        web_app=WebAppInfo(url=f"{webapp_url}?gameId={game.id}&mode={game.mode}")
+                    )
+                ])
     else:
         player_status = "✅ Вы готовы" if player.ready else "⏳ Ожидание"
         text = f"✅ Все корабли расставлены!{opponent_info}\n\n"
@@ -754,6 +770,18 @@ async def send_setup_message(game: GameState, player_id: str, chat_id: int):
             show_preview=False,
             is_p2=(player_id == 'p2')
         )
+        
+        # Добавляем кнопку Mini App если нужно
+        if show_miniapp:
+            from aiogram.types import InlineKeyboardButton, WebAppInfo
+            webapp_url = os.getenv("WEBAPP_URL", "https://seabatl.netlify.app")
+            if keyboard.inline_keyboard:
+                keyboard.inline_keyboard.append([
+                    InlineKeyboardButton(
+                        text="🌐 Открыть Mini App",
+                        web_app=WebAppInfo(url=f"{webapp_url}?gameId={game.id}&mode={game.mode}")
+                    )
+                ])
 
     # Всегда пытаемся обновить существующее сообщение
     if player.setup_message_id:
@@ -1513,8 +1541,10 @@ async def cmd_start(message: Message, command: CommandStart):
                 await send_setup_message(game, 'p1', p1.user_id)
             except Exception as e:
                 logger.error(f"Ошибка при отправке сообщения p1: {e}")
+        
+        # Отправляем сообщение p2 с кнопкой Mini App
         try:
-            await send_setup_message(game, 'p2', p2.user_id)
+            await send_setup_message(game, 'p2', p2.user_id, show_miniapp=True)
         except Exception as e:
             logger.error(f"Ошибка при отправке сообщения p2: {e}")
         
