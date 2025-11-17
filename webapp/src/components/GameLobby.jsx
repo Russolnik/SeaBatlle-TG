@@ -103,7 +103,7 @@ export default function GameLobby({ gameId, onCreateGame, user }) {
           <label className="block text-xl font-bold mb-4 text-gray-800 dark:text-gray-200">Режим игры:</label>
           <div className="space-y-3">
             {[
-              { mode: 'full', name: 'Полный (10×10)', desc: '1×4, 2×3, 3×2, 4×1' },
+              { mode: 'full', name: 'Классика (10×10)', desc: '1×4, 2×3, 3×2, 4×1' },
               { mode: 'classic', name: 'Обычный (8×8)', desc: '2×3, 2×2, 4×1' },
               { mode: 'fast', name: 'Быстрый (6×6)', desc: '1×3, 1×2, 2×1' }
             ].map(({ mode, name, desc }) => (

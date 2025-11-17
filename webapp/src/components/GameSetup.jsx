@@ -162,28 +162,30 @@ export default function GameSetup({ gameState, playerId, onStateUpdate, socket }
 
           {placingShip && (
             <div className="mt-4 pt-4 border-t-2 border-gray-200 dark:border-gray-700">
-              <div className="flex items-center gap-4">
-                <span className="text-gray-700 dark:text-gray-300 font-semibold">Ориентация:</span>
-                <button
-                  onClick={() => setHorizontal(true)}
-                  className={`px-4 py-2 rounded-lg font-semibold transition-all ${
-                    horizontal
-                      ? 'bg-blue-500 text-white shadow-lg'
-                      : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
-                  }`}
-                >
-                  ➡ Горизонтально
-                </button>
-                <button
-                  onClick={() => setHorizontal(false)}
-                  className={`px-4 py-2 rounded-lg font-semibold transition-all ${
-                    !horizontal
-                      ? 'bg-blue-500 text-white shadow-lg'
-                      : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
-                  }`}
-                >
-                  ⬇ Вертикально
-                </button>
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4">
+                <span className="text-gray-700 dark:text-gray-300 font-semibold whitespace-nowrap">Ориентация:</span>
+                <div className="flex gap-3 w-full sm:w-auto">
+                  <button
+                    onClick={() => setHorizontal(true)}
+                    className={`flex-1 sm:flex-none px-4 py-2 rounded-lg font-semibold transition-all ${
+                      horizontal
+                        ? 'bg-blue-500 text-white shadow-lg'
+                        : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+                    }`}
+                  >
+                    ➡ Горизонтально
+                  </button>
+                  <button
+                    onClick={() => setHorizontal(false)}
+                    className={`flex-1 sm:flex-none px-4 py-2 rounded-lg font-semibold transition-all ${
+                      !horizontal
+                        ? 'bg-blue-500 text-white shadow-lg'
+                        : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+                    }`}
+                  >
+                    ⬇ Вертикально
+                  </button>
+                </div>
               </div>
             </div>
           )}

@@ -390,11 +390,8 @@ def api_attack(game_id):
             logger.info(f"API: Ход остается у {player_id} (попадание)")
         
         # Обновляем время последнего хода
-        game.last_move_time = datetime.now().timestamp()
-        
-        # Проверяем окончание игры
-        if game.winner:
-            end_game(game)
+        if game.is_timed:
+            game.last_move_time = datetime.now().timestamp()
         
         # Уведомляем через WebSocket
         socketio.emit('move', {
@@ -411,9 +408,23 @@ def api_attack(game_id):
         socketio.emit('game_state', state_p1, room=f'game_{game_id}')
         socketio.emit('game_state', state_p2, room=f'game_{game_id}')
         
+        # Проверяем окончание игры после отправки состояния
+        if game.winner:
+            # end_game - асинхронная функция, вызываем её через asyncio
+            import asyncio
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    asyncio.create_task(end_game(game))
+                else:
+                    loop.run_until_complete(end_game(game))
+            except Exception as e:
+                logger.error(f"Ошибка вызова end_game: {e}", exc_info=True)
+        
         return jsonify({
             'result': result,
-            'game_state': serialize_game_state(game, player_id)
+            'game_state': serialize_game_state(game, player_id),
+            'current_player': game.current_player
         }), 200
     except Exception as e:
         logger.error(f"Ошибка атаки: {e}")
@@ -743,6 +754,7 @@ def serialize_game_state(game: GameState, player_id: str) -> dict:
                 'username': player.username if player else None,
                 'board': player_board,
                 'attacks': player_attacks,
+                'ships': player.ships if player and hasattr(player, 'ships') else [],
                 'ships_remaining': get_remaining_ships(player) if player else 0,
                 'ready': player.ready if player else False
             },
@@ -1136,14 +1148,14 @@ async def cmd_play(message: Message):
     logger.info(f"Создание новой игры пользователем {message.from_user.id} (@{message.from_user.username})")
     
     game_id = str(uuid.uuid4())[:8]
-    config = get_ship_config('classic')  # По умолчанию
+    config = get_ship_config('full')  # По умолчанию - классика 10×10
     
     # Сохраняем group_id только если это группа
     group_id = message.chat.id if message.chat.type != "private" else None
     
     game = GameState(
         id=game_id,
-        mode='classic',
+        mode='full',  # По умолчанию - классика 10×10
         is_timed=False,
         group_id=group_id
     )
@@ -1199,32 +1211,46 @@ async def cmd_play(message: Message):
     
     # Если игра в группе, отправляем приглашение в группу
     if game.group_id:
-        bot_info = await get_bot_info()
-        group_text = f"🎮 Новая игра создана!\n\n"
-        group_text += f"Создатель: @{p1.username}\n"
-        group_text += f"ID игры: {game_id}\n\n"
-        group_text += f"Присоединяйтесь к игре!"
-        
-        # Клавиатура с кнопкой присоединения
-        from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-        group_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="🎮 Присоединиться к игре",
-                    url=f"https://t.me/{bot_info['username']}?start=join_{game_id}"
-                )
-            ]
-        ])
-        
         try:
+            # Получаем username бота (bot_info - это объект User из aiogram)
+            bot_username = bot_info.username
+            if not bot_username:
+                bot_info_dict = await get_bot_info()
+                bot_username = bot_info_dict.get('username', '')
+            
+            if not bot_username:
+                logger.error(f"Не удалось получить username бота для игры {game_id}")
+                bot_username = "your_bot_username"  # Fallback
+            
+            group_text = f"🎮 Новая игра создана!\n\n"
+            group_text += f"Создатель: @{p1.username}\n"
+            group_text += f"ID игры: {game_id}\n\n"
+            group_text += f"Присоединяйтесь к игре!"
+            
+            # Клавиатура с кнопкой присоединения
+            from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+            join_url = f"https://t.me/{bot_username}?start=join_{game_id}"
+            logger.info(f"Создание кнопки присоединения: {join_url}")
+            
+            group_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="🎮 Присоединиться к игре",
+                        url=join_url
+                    )
+                ]
+            ])
+            
+            logger.info(f"Попытка отправить сообщение в группу {game.group_id} для игры {game_id}, bot_username: {bot_username}")
             group_msg = await bot.send_message(
                 chat_id=game.group_id,
                 text=group_text,
                 reply_markup=group_keyboard
             )
             game.group_messages.append(group_msg.message_id)
+            logger.info(f"✅ Сообщение успешно отправлено в группу {game.group_id}, message_id: {group_msg.message_id}, всего сообщений в группе: {len(game.group_messages)}")
         except Exception as e:
-            logger.error(f"Ошибка отправки сообщения в группу: {e}")
+            logger.error(f"❌ Ошибка отправки сообщения в группу {game.group_id}: {e}", exc_info=True)
 
 
 @dp.message(Command("stop"))
