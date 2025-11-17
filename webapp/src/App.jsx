@@ -16,20 +16,34 @@ function App() {
   const { user, authToken, loading: authLoading } = useTelegramAuth()
   const { socket, connected } = useWebSocket(gameId, authToken)
 
-  // Получаем gameId из URL
+  // Получаем gameId из URL или localStorage
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
-    const id = params.get('gameId')
-    if (id) {
-      setGameId(id)
+    const urlGameId = params.get('gameId')
+    
+    if (urlGameId) {
+      setGameId(urlGameId)
+      // Сохраняем в localStorage
+      localStorage.setItem('activeGameId', urlGameId)
+    } else {
+      // Проверяем localStorage
+      const savedGameId = localStorage.getItem('activeGameId')
+      if (savedGameId) {
+        setGameId(savedGameId)
+      }
     }
   }, [])
 
-  // Загружаем игру после авторизации
+  // Загружаем активную игру после авторизации
   useEffect(() => {
-    if (authLoading || !user || !gameId) return
+    if (authLoading || !user) return
     
-    loadGame()
+    // Если нет gameId - проверяем активную игру пользователя
+    if (!gameId) {
+      loadActiveGame()
+    } else {
+      loadGame()
+    }
   }, [authLoading, user, gameId])
 
   // Слушаем WebSocket обновления
@@ -37,13 +51,47 @@ function App() {
     if (!socket || !connected) return
 
     socket.on('game_state', (state) => {
-      if (state) setGameState(state)
+      if (state) {
+        setGameState(state)
+        // Сохраняем gameId при обновлении
+        if (state.id) {
+          setGameId(state.id)
+          localStorage.setItem('activeGameId', state.id)
+        }
+      }
     })
 
     return () => {
       socket.off('game_state')
     }
   }, [socket, connected])
+
+  const loadActiveGame = async () => {
+    if (!user) return
+    
+    try {
+      setLoading(true)
+      setError(null)
+      
+      const response = await api.get(`/api/user/active-game?user_id=${user.id}`)
+      
+      if (response.game && response.game.game_id) {
+        const { game_id, player_id, game_state } = response.game
+        setGameId(game_id)
+        setPlayerId(player_id)
+        setGameState(game_state)
+        localStorage.setItem('activeGameId', game_id)
+      } else {
+        // Нет активной игры
+        localStorage.removeItem('activeGameId')
+      }
+    } catch (err) {
+      console.error('Ошибка загрузки активной игры:', err)
+      localStorage.removeItem('activeGameId')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const loadGame = async () => {
     if (!gameId || !user) return
@@ -68,14 +116,18 @@ function App() {
         })
         setPlayerId(joinRes.player_id)
         setGameState(joinRes.game_state)
+        localStorage.setItem('activeGameId', gameId)
       } else {
         setGameState(state)
         if (p1?.user_id === user.id) setPlayerId('p1')
         else if (p2?.user_id === user.id) setPlayerId('p2')
+        localStorage.setItem('activeGameId', gameId)
       }
     } catch (err) {
-      // Если игра не найдена - пытаемся присоединиться
+      // Если игра не найдена - удаляем из localStorage и проверяем активную игру
       if (err.message?.includes('404') || err.message?.includes('not found')) {
+        localStorage.removeItem('activeGameId')
+        // Пытаемся присоединиться
         try {
           const joinRes = await api.post(`/api/game/${gameId}/join`, {
             user_id: user.id,
@@ -83,8 +135,10 @@ function App() {
           })
           setPlayerId(joinRes.player_id)
           setGameState(joinRes.game_state)
+          localStorage.setItem('activeGameId', gameId)
         } catch (joinErr) {
-          setError('Игра не найдена')
+          // Если не удалось - проверяем активную игру
+          loadActiveGame()
         }
       } else {
         setError(err.message || 'Ошибка загрузки игры')
@@ -108,6 +162,7 @@ function App() {
       setGameId(res.game_id)
       setPlayerId(res.player_id)
       setGameState(res.game_state)
+      localStorage.setItem('activeGameId', res.game_id)
     } catch (err) {
       setError(err.message || 'Ошибка создания игры')
     } finally {
@@ -132,7 +187,10 @@ function App() {
         <div className="text-center bg-red-100 dark:bg-red-900 p-6 rounded-lg">
           <p className="text-red-800 dark:text-red-200 mb-4">{error}</p>
           <button
-            onClick={() => window.location.reload()}
+            onClick={() => {
+              localStorage.removeItem('activeGameId')
+              window.location.reload()
+            }}
             className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
           >
             Перезагрузить

@@ -18,7 +18,13 @@ export default function GameLobby({ gameId, onCreateGame, user }) {
 
   // Если есть gameId - показываем ожидание
   if (gameId) {
-    const shareLink = `${window.location.origin}${window.location.pathname}?gameId=${gameId}`
+    // Ссылка должна вести в бота, а не напрямую в Mini App
+    // Получаем username бота из URL или из Telegram WebApp
+    const urlParams = new URLSearchParams(window.location.search)
+    const botUsername = urlParams.get('bot') || 
+                       window.Telegram?.WebApp?.initDataUnsafe?.start_param?.split('_')[0] || 
+                       'your_bot_username'
+    const shareLink = `https://t.me/${botUsername}?start=join_${gameId}`
 
     return (
       <div className="min-h-screen flex items-center justify-center p-4">

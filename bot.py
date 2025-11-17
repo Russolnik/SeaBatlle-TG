@@ -488,6 +488,37 @@ def api_auto_place(game_id):
         logger.error(f"Ошибка авто-расстановки: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/user/active-game', methods=['GET'])
+def api_get_active_game():
+    """Получить активную игру пользователя"""
+    try:
+        user_id = request.args.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'User ID required'}), 400
+        
+        user_id = int(user_id)
+        existing = get_game_by_user(user_id)
+        
+        if not existing:
+            return jsonify({'game': None}), 200
+        
+        game_id, game, player_id = existing
+        
+        # Проверяем, не завершена ли игра
+        if game.winner or game.surrendered:
+            return jsonify({'game': None}), 200
+        
+        return jsonify({
+            'game': {
+                'game_id': game_id,
+                'player_id': player_id,
+                'game_state': serialize_game_state(game, player_id)
+            }
+        }), 200
+    except Exception as e:
+        logger.error(f"Ошибка получения активной игры: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/game/<game_id>/surrender', methods=['POST'])
 def api_surrender(game_id):
     """Сдаться"""
@@ -750,11 +781,13 @@ async def send_setup_message(game: GameState, player_id: str, chat_id: int, show
         if show_miniapp:
             from aiogram.types import InlineKeyboardButton, WebAppInfo
             webapp_url = os.getenv("WEBAPP_URL", "https://seabatl.netlify.app")
+            # Получаем username бота
+            bot_info = await get_bot_info()
             if keyboard.inline_keyboard:
                 keyboard.inline_keyboard.append([
                     InlineKeyboardButton(
                         text="🌐 Открыть Mini App",
-                        web_app=WebAppInfo(url=f"{webapp_url}?gameId={game.id}&mode={game.mode}")
+                        web_app=WebAppInfo(url=f"{webapp_url}?gameId={game.id}&mode={game.mode}&bot={bot_info['username']}")
                     )
                 ])
     else:
@@ -775,11 +808,13 @@ async def send_setup_message(game: GameState, player_id: str, chat_id: int, show
         if show_miniapp:
             from aiogram.types import InlineKeyboardButton, WebAppInfo
             webapp_url = os.getenv("WEBAPP_URL", "https://seabatl.netlify.app")
+            # Получаем username бота
+            bot_info = await get_bot_info()
             if keyboard.inline_keyboard:
                 keyboard.inline_keyboard.append([
                     InlineKeyboardButton(
                         text="🌐 Открыть Mini App",
-                        web_app=WebAppInfo(url=f"{webapp_url}?gameId={game.id}&mode={game.mode}")
+                        web_app=WebAppInfo(url=f"{webapp_url}?gameId={game.id}&mode={game.mode}&bot={bot_info['username']}")
                     )
                 ])
 
@@ -1124,6 +1159,9 @@ async def cmd_play(message: Message):
     # Получаем URL для Mini App (из переменной окружения или используем дефолтный)
     webapp_url = os.getenv("WEBAPP_URL", "https://seabatl.netlify.app")
     
+    # Получаем username бота для ссылок
+    bot_info = await bot.get_me()
+    
     # Создаем клавиатуру с выбором режима и кнопкой Mini App
     from aiogram.types import InlineKeyboardButton, WebAppInfo
     mode_keyboard = get_mode_keyboard(game.mode, game.is_timed if game.is_timed else None)
@@ -1133,7 +1171,7 @@ async def cmd_play(message: Message):
         mode_keyboard.inline_keyboard.append([
             InlineKeyboardButton(
                 text="🌐 Играть в веб-версии",
-                web_app=WebAppInfo(url=f"{webapp_url}?gameId={game_id}&mode={game.mode}")
+                web_app=WebAppInfo(url=f"{webapp_url}?gameId={game_id}&mode={game.mode}&bot={bot_info.username}")
             )
         ])
     
