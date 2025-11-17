@@ -418,12 +418,19 @@ def api_place_ship(game_id):
         
         config = get_ship_config(game.mode)
         
-        # Валидация размещения
-        if not validate_ship_placement(player.board, player.ships, size, row, col, horizontal, config['size']):
+        # Валидация размещения (правильный порядок параметров: board, size, row, col, ship_size, horizontal)
+        if not validate_ship_placement(player.board, config['size'], row, col, size, horizontal):
             return jsonify({'error': 'Invalid ship placement'}), 400
         
-        # Размещаем корабль
-        place_ship(player.board, player.ships, size, row, col, horizontal)
+        # Размещаем корабль (правильный порядок параметров: board, row, col, ship_size, horizontal)
+        cells = place_ship(player.board, row, col, size, horizontal)
+        
+        # Добавляем корабль в список
+        player.ships.append({
+            'size': size,
+            'cells': cells,
+            'destroyed': False
+        })
         
         # Проверяем, все ли корабли размещены
         required_ships_list = config['ships']  # Это список размеров
@@ -480,15 +487,11 @@ def api_auto_place(game_id):
             board, ships = auto_place_ships(game.mode)
             player.board = board
             player.ships = ships
-            player.ready = True
+            # НЕ устанавливаем ready автоматически - пользователь должен подтвердить
+            player.ready = False
         except Exception as e:
             logger.error(f"Ошибка в auto_place_ships для режима {game.mode}: {e}", exc_info=True)
             raise
-        
-        # Если оба игрока готовы, начинаем бой
-        if game.players['p1'] and game.players['p1'].ready and \
-           game.players['p2'] and game.players['p2'].ready:
-            game.current_player = 'p1'
         
         # Уведомляем через WebSocket
         socketio.emit('game_state', serialize_game_state(game, 'p1'), room=f'game_{game_id}')
@@ -569,6 +572,60 @@ def api_get_active_game():
         logger.error(f"Ошибка получения активной игры: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/game/<game_id>/ready', methods=['POST'])
+def api_ready(game_id):
+    """Игрок готов"""
+    try:
+        player_id = request.json.get('player_id', 'p1')
+        
+        if game_id not in games:
+            return jsonify({'error': 'Game not found'}), 404
+        
+        game = games[game_id]
+        player = game.get_player(player_id)
+        
+        if not player:
+            return jsonify({'error': 'Player not found'}), 400
+        
+        # Проверяем, все ли корабли размещены
+        config = get_ship_config(game.mode)
+        required_ships_list = config['ships']
+        required_ships_dict = {}
+        for size in required_ships_list:
+            required_ships_dict[size] = required_ships_dict.get(size, 0) + 1
+        
+        placed_ships = {}
+        for ship in player.ships:
+            placed_ships[ship['size']] = placed_ships.get(ship['size'], 0) + 1
+        
+        all_placed = all(
+            placed_ships.get(size, 0) >= count
+            for size, count in required_ships_dict.items()
+        )
+        
+        if not all_placed:
+            return jsonify({'error': 'Not all ships placed'}), 400
+        
+        player.ready = True
+        
+        # Если оба игрока готовы, начинаем бой
+        if game.players['p1'] and game.players['p1'].ready and \
+           game.players['p2'] and game.players['p2'].ready:
+            game.current_player = 'p1' if (datetime.now().timestamp() % 2 == 0) else 'p2'
+            if game.is_timed:
+                game.last_move_time = datetime.now().timestamp()
+        
+        # Уведомляем через WebSocket
+        socketio.emit('game_state', serialize_game_state(game, 'p1'), room=f'game_{game_id}')
+        socketio.emit('game_state', serialize_game_state(game, 'p2'), room=f'game_{game_id}')
+        
+        return jsonify({
+            'game_state': serialize_game_state(game, player_id)
+        }), 200
+    except Exception as e:
+        logger.error(f"Ошибка готовности: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/game/<game_id>/surrender', methods=['POST'])
 def api_surrender(game_id):
     """Сдаться"""
@@ -579,16 +636,30 @@ def api_surrender(game_id):
             return jsonify({'error': 'Game not found'}), 404
         
         game = games[game_id]
-        game.surrendered = True
-        game.winner = 'p2' if player_id == 'p1' else 'p1'
+        opponent_id = 'p2' if player_id == 'p1' else 'p1'
+        game.surrendered = player_id
+        game.winner = opponent_id
         
-        end_game(game)
+        # end_game - асинхронная функция, вызываем её через asyncio
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(end_game(game))
+            else:
+                loop.run_until_complete(end_game(game))
+        except Exception as e:
+            logger.error(f"Ошибка вызова end_game: {e}", exc_info=True)
+        
+        # Уведомляем через WebSocket
+        socketio.emit('game_state', serialize_game_state(game, 'p1'), room=f'game_{game_id}')
+        socketio.emit('game_state', serialize_game_state(game, 'p2'), room=f'game_{game_id}')
         
         return jsonify({
             'game_state': serialize_game_state(game, player_id)
         }), 200
     except Exception as e:
-        logger.error(f"Ошибка сдачи: {e}")
+        logger.error(f"Ошибка сдачи: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 def serialize_game_state(game: GameState, player_id: str) -> dict:
@@ -1270,8 +1341,39 @@ async def callback_mode(callback: CallbackQuery):
     if p1:
         p1.board = create_empty_board(config['size'])
         p1.attacks = create_empty_attacks(config['size'])
+        p1.ships = []
+        p1.ready = False
     
-    await callback.answer(f"Режим: {'Обычный' if mode == 'classic' else 'Быстрый'}")
+    mode_names = {
+        'full': 'Полный',
+        'classic': 'Обычный',
+        'fast': 'Быстрый'
+    }
+    await callback.answer(f"Режим: {mode_names.get(mode, mode)}")
+    
+    # Обновляем сообщение с кнопкой Mini App
+    text = f"🎮 Игра создана!\n\n"
+    text += f"Режим: {mode_names.get(mode, mode)} ({config['size']}×{config['size']})\n"
+    text += f"Выберите таймер:"
+    
+    mode_keyboard = get_mode_keyboard(game.mode, game.is_timed if game.is_timed else None)
+    from aiogram.types import InlineKeyboardButton, WebAppInfo
+    webapp_url = os.getenv("WEBAPP_URL", "https://seabatl.netlify.app")
+    bot_info = await get_bot_info()
+    
+    # Добавляем кнопку Mini App
+    if mode_keyboard.inline_keyboard:
+        mode_keyboard.inline_keyboard.append([
+            InlineKeyboardButton(
+                text="🎮 Открыть приложение",
+                web_app=WebAppInfo(url=f"{webapp_url}?gameId={game.id}&mode={game.mode}&bot={bot_info['username']}")
+            )
+        ])
+    
+    try:
+        await callback.message.edit_text(text, reply_markup=mode_keyboard)
+    except:
+        pass
     
     # Если это реванш, показываем выбор таймера после выбора режима
     if game.rematch_opponent_id:
@@ -1308,9 +1410,24 @@ async def callback_mode(callback: CallbackQuery):
     text += f"Режим: {mode_names.get(mode, mode)}\n"
     text += f"Выберите таймер:"
     
+    # Создаем клавиатуру с кнопкой Mini App
+    mode_keyboard = get_mode_keyboard(game.mode, game.is_timed if game.is_timed else None)
+    from aiogram.types import InlineKeyboardButton, WebAppInfo
+    webapp_url = os.getenv("WEBAPP_URL", "https://seabatl.netlify.app")
+    bot_info = await get_bot_info()
+    
+    # Добавляем кнопку Mini App
+    if mode_keyboard.inline_keyboard:
+        mode_keyboard.inline_keyboard.append([
+            InlineKeyboardButton(
+                text="🎮 Открыть приложение",
+                web_app=WebAppInfo(url=f"{webapp_url}?gameId={game.id}&mode={game.mode}&bot={bot_info['username']}")
+            )
+        ])
+    
     # Обновляем существующее сообщение
     try:
-        await callback.message.edit_text(text, reply_markup=get_mode_keyboard(game.mode, game.is_timed if game.is_timed else None))
+        await callback.message.edit_text(text, reply_markup=mode_keyboard)
     except Exception:
         # Если не удалось обновить, удаляем старое и создаем новое
         try:
@@ -1351,6 +1468,36 @@ async def callback_timer(callback: CallbackQuery):
             game.time_limit = 120  # 2 минуты на ход для обычного режима
     
     await callback.answer(f"Таймер: {'включен' if game.is_timed else 'выключен'}")
+    
+    # Обновляем сообщение с кнопкой Mini App
+    mode_names = {
+        'full': 'Полный (10×10)',
+        'classic': 'Обычный (8×8)',
+        'fast': 'Быстрый (6×6)'
+    }
+    text = f"🎮 Игра создана!\n\n"
+    text += f"Режим: {mode_names.get(game.mode, game.mode)}\n"
+    text += f"Таймер: {'включен' if game.is_timed else 'выключен'}\n\n"
+    text += f"Играйте в Mini App!"
+    
+    mode_keyboard = get_mode_keyboard(game.mode, game.is_timed)
+    from aiogram.types import InlineKeyboardButton, WebAppInfo
+    webapp_url = os.getenv("WEBAPP_URL", "https://seabatl.netlify.app")
+    bot_info = await get_bot_info()
+    
+    # Добавляем кнопку Mini App
+    if mode_keyboard.inline_keyboard:
+        mode_keyboard.inline_keyboard.append([
+            InlineKeyboardButton(
+                text="🎮 Открыть приложение",
+                web_app=WebAppInfo(url=f"{webapp_url}?gameId={game.id}&mode={game.mode}&bot={bot_info['username']}")
+            )
+        ])
+    
+    try:
+        await callback.message.edit_text(text, reply_markup=mode_keyboard)
+    except:
+        pass
     
     # Если это реванш, отправляем приглашение противнику
     if game.rematch_opponent_id:

@@ -12,7 +12,7 @@ export default function Board({ board, size = 10, interactive = false, showShips
     // Создаем пустую доску для отображения
     const emptyBoard = Array.from({ length: size }, () => Array.from({ length: size }, () => '🌊'))
     return (
-      <div className="inline-block p-3 bg-gradient-to-br from-blue-50 to-blue-100 dark:from-gray-800 dark:to-gray-900 rounded-xl shadow-lg border-2 border-blue-200 dark:border-blue-700">
+      <div className="inline-block p-3 bg-gradient-to-br from-sky-50 to-blue-100 dark:from-gray-800 dark:to-gray-900 rounded-xl shadow-lg border-2 border-blue-200 dark:border-blue-700">
         <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))` }}>
           {Array.from({ length: size }, (_, row) =>
             Array.from({ length: size }, (_, col) => (
@@ -49,7 +49,7 @@ export default function Board({ board, size = 10, interactive = false, showShips
     let classes = 'w-8 h-8 sm:w-10 sm:h-10 flex items-center justify-center text-xs sm:text-sm border-2 rounded transition-all duration-150'
     
     if (interactive && (cell === CELL_STATES.EMPTY || cell === '🌊')) {
-      classes += ' cursor-pointer hover:scale-110 hover:shadow-md active:scale-95 border-blue-400 dark:border-blue-500 bg-blue-100 dark:bg-blue-900/30'
+      classes += ' cursor-pointer hover:scale-110 hover:shadow-lg active:scale-95 border-blue-400 dark:border-blue-500 bg-blue-100 dark:bg-blue-900/30'
     } else if (!interactive) {
       classes += ' border-blue-300 dark:border-blue-600'
     }
@@ -70,7 +70,7 @@ export default function Board({ board, size = 10, interactive = false, showShips
   }
 
   return (
-    <div className="inline-block p-3 bg-gradient-to-br from-blue-50 to-blue-100 dark:from-gray-800 dark:to-gray-900 rounded-xl shadow-lg border-2 border-blue-200 dark:border-blue-700">
+    <div className="inline-block p-3 bg-gradient-to-br from-sky-50 to-blue-100 dark:from-gray-800 dark:to-gray-900 rounded-xl shadow-lg border-2 border-blue-200 dark:border-blue-700">
       <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${actualSize}, minmax(0, 1fr))` }}>
         {Array.from({ length: actualSize }, (_, row) =>
           Array.from({ length: actualSize }, (_, col) => (
