@@ -274,16 +274,32 @@ def api_join_game(game_id):
     try:
         data = request.json
         user_id = data.get('user_id')
+        username = data.get('username', f'user_{user_id}')
+        
+        logger.info(f"API: Попытка присоединения к игре {game_id}, user_id={user_id}, username={username}, всего игр: {len(games)}")
+        if len(games) > 0:
+            logger.info(f"API: Доступные ID игр (первые 10): {list(games.keys())[:10]}")
         
         if not user_id:
             return jsonify({'error': 'User ID required'}), 400
         
         if game_id not in games:
+            logger.warning(f"API: Игра {game_id} не найдена при попытке присоединения")
             return jsonify({'error': 'Game not found'}), 404
         
         game = games[game_id]
         
+        # Проверяем, не присоединился ли уже пользователь
+        for pid, player in game.players.items():
+            if player and player.user_id == user_id:
+                logger.info(f"API: Пользователь {user_id} уже в игре {game_id} как {pid}")
+                return jsonify({
+                    'player_id': pid,
+                    'game_state': serialize_game_state(game, pid)
+                }), 200
+        
         if game.players['p2']:
+            logger.warning(f"API: Игра {game_id} уже заполнена")
             return jsonify({'error': 'Game is full'}), 400
         
         config = get_ship_config(game.mode)
@@ -295,6 +311,7 @@ def api_join_game(game_id):
         )
         
         game.players['p2'] = p2
+        logger.info(f"API: Пользователь {user_id} присоединился к игре {game_id} как p2")
         
         # Уведомляем через WebSocket
         socketio.emit('game_state', serialize_game_state(game, 'p1'), room=f'game_{game_id}')
@@ -305,7 +322,7 @@ def api_join_game(game_id):
             'game_state': serialize_game_state(game, 'p2')
         }), 200
     except Exception as e:
-        logger.error(f"Ошибка присоединения: {e}")
+        logger.error(f"Ошибка присоединения: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/game/<game_id>/attack', methods=['POST'])
@@ -1073,20 +1090,22 @@ async def cmd_play(message: Message):
         text += f"Выберите режим:"
     
     # Получаем URL для Mini App (из переменной окружения или используем дефолтный)
-    webapp_url = os.getenv("WEBAPP_URL", "https://your-webapp-domain.com")
+    webapp_url = os.getenv("WEBAPP_URL", "https://seabatl.netlify.app")
     
     # Создаем клавиатуру с выбором режима и кнопкой Mini App
     from aiogram.types import InlineKeyboardButton, WebAppInfo
     mode_keyboard = get_mode_keyboard(game.mode, game.is_timed if game.is_timed else None)
     
-    # Добавляем кнопку Mini App
+    # Добавляем кнопку Mini App с правильным gameId и mode
     if mode_keyboard.inline_keyboard:
         mode_keyboard.inline_keyboard.append([
             InlineKeyboardButton(
                 text="🌐 Играть в веб-версии",
-                web_app=WebAppInfo(url=f"{webapp_url}?gameId={game_id}&mode=classic")
+                web_app=WebAppInfo(url=f"{webapp_url}?gameId={game_id}&mode={game.mode}")
             )
         ])
+    
+    logger.info(f"Создана кнопка Mini App для игры {game_id}, URL: {webapp_url}?gameId={game_id}&mode={game.mode}")
     
     msg = await message.answer(text, reply_markup=mode_keyboard)
     game.setup_message_id = msg.message_id
@@ -3004,10 +3023,10 @@ async def cleanup_old_games():
                     logger.info(f"Удалена старая игра {game_id} (старше 24 часов)")
                     continue
                 
-                # Удаляем игры без второго игрока старше 1 часа
-                if game.players['p2'] is None and current_time - game.created_at > 3600:  # 1 час
+                # Удаляем игры без второго игрока старше 6 часов (даем больше времени для присоединения)
+                if game.players['p2'] is None and current_time - game.created_at > 21600:  # 6 часов
                     games_to_remove.append(game_id)
-                    logger.info(f"Удалена неактивная игра {game_id} (без второго игрока более 1 часа)")
+                    logger.info(f"Удалена неактивная игра {game_id} (без второго игрока более 6 часов)")
                     continue
                 
                 # Удаляем завершенные игры старше 1 часа

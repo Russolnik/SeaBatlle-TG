@@ -74,9 +74,13 @@ export function useWebSocket(gameId, authToken) {
       const wsUrl = await getWSUrl()
       
       // Создаем подключение
-      const newSocket = io(`${wsUrl}/ws/game/${gameId}`, {
+      // Flask-SocketIO использует query параметры для game_id
+      const newSocket = io(wsUrl, {
         auth: {
           token: authToken,
+        },
+        query: {
+          game_id: gameId
         },
         transports: ['websocket', 'polling'],
         reconnection: true,
@@ -106,8 +110,11 @@ export function useWebSocket(gameId, authToken) {
             newSocket.disconnect()
             
             // Пробуем подключиться к продакшн
-            const prodSocket = io(`${prodUrl}/ws/game/${gameId}`, {
+            const prodSocket = io(prodUrl, {
               auth: { token: authToken },
+              query: {
+                game_id: gameId
+              },
               transports: ['websocket', 'polling'],
             })
             

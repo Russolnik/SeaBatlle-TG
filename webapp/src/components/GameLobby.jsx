@@ -18,15 +18,27 @@ export default function GameLobby({ gameId, onJoin, onCreateGame, user }) {
 
   // Если gameId есть - показываем лобби для ожидания
   if (gameId) {
-    const shareLink = `${window.location.origin}${window.location.pathname}?gameId=${gameId}`
+    // Ссылка должна вести на Mini App, а не на браузер
+    // Используем текущий URL с gameId для открытия Mini App
+    const webappUrl = window.location.origin + window.location.pathname
+    const shareLink = `${webappUrl}?gameId=${gameId}`
 
     const copyLink = () => {
       navigator.clipboard.writeText(shareLink)
       // Используем Telegram WebApp API для уведомления, если доступен
       if (window.Telegram?.WebApp?.showAlert) {
-        window.Telegram.WebApp.showAlert('Ссылка скопирована!')
+        window.Telegram.WebApp.showAlert('Ссылка скопирована! Отправьте её другу в Telegram.')
       } else {
-        alert('Ссылка скопирована!')
+        alert('Ссылка скопирована! Отправьте её другу в Telegram.')
+      }
+    }
+    
+    // Используем Telegram WebApp для открытия ссылки на бота
+    const shareViaTelegram = () => {
+      if (window.Telegram?.WebApp?.openTelegramLink) {
+        window.Telegram.WebApp.openTelegramLink(shareLink)
+      } else {
+        copyLink()
       }
     }
 

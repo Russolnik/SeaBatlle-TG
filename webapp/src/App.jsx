@@ -88,7 +88,32 @@ function App() {
   const loadGameState = async (id) => {
     try {
       const userData = user || { id: Date.now() }
+      
+      // Сначала пытаемся получить состояние игры
       const state = await api.get(`/api/game/${id}/state?player_id=${playerId || 'p1'}`)
+      
+      // Проверяем, является ли текущий пользователь участником игры
+      const p1 = state.players?.p1
+      const p2 = state.players?.p2
+      const isPlayerInGame = (p1 && p1.user_id === userData.id) || (p2 && p2.user_id === userData.id)
+      
+      if (!isPlayerInGame && state.phase === 'lobby') {
+        // Если пользователь не в игре и игра в лобби - присоединяемся
+        try {
+          const joinResponse = await api.post(`/api/game/${id}/join`, {
+            user_id: userData.id,
+            username: userData.username || userData.first_name || `user_${userData.id}`
+          })
+          const { player_id, game_state } = joinResponse
+          setPlayerId(player_id)
+          setGameState(game_state)
+          return
+        } catch (joinErr) {
+          console.error('Ошибка присоединения:', joinErr)
+          // Если не удалось присоединиться, показываем состояние игры
+        }
+      }
+      
       setGameState(state)
       if (state.player_id) {
         setPlayerId(state.player_id)
