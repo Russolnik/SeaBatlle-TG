@@ -1,63 +1,13 @@
 import { useState, useEffect, useRef } from 'react'
 import { io } from 'socket.io-client'
 
-// Кэш для WebSocket URL
-let cachedWSUrl = null
+const WS_URL = import.meta.env.VITE_WS_URL || 
+               import.meta.env.VITE_BACKEND_URL || 
+               'https://seabatlle-tg.onrender.com'
 
-// Функция для преобразования HTTP URL в WebSocket URL
 const httpToWs = (url) => {
-  if (url.startsWith('ws://') || url.startsWith('wss://')) {
-    return url
-  }
+  if (url.startsWith('ws://') || url.startsWith('wss://')) return url
   return url.replace('http://', 'ws://').replace('https://', 'wss://')
-}
-
-// Функция для получения WebSocket URL
-const getWSUrl = async () => {
-  // Если указан явно - используем его
-  if (import.meta.env.VITE_WS_URL) {
-    return import.meta.env.VITE_WS_URL
-  }
-  
-  // Если есть кэш - используем его
-  if (cachedWSUrl) {
-    return cachedWSUrl
-  }
-  
-  const prodUrl = import.meta.env.VITE_API_URL || 
-                 import.meta.env.VITE_BACKEND_URL || 
-                 'https://seabatlle-tg.onrender.com'
-  
-  // В продакшене (Netlify) не пробуем localhost - это невозможно
-  // Пробуем localhost только в разработке (localhost или 127.0.0.1)
-  if (!import.meta.env.PROD && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
-    const localhostUrl = 'http://localhost:5000'
-    try {
-      const response = await fetch(`${localhostUrl}/health`, {
-        method: 'GET',
-        signal: AbortSignal.timeout(2000),
-      })
-      if (response.ok) {
-        cachedWSUrl = httpToWs(localhostUrl)
-        return cachedWSUrl
-      }
-    } catch {
-      // localhost недоступен, пробуем продакшн
-    }
-  }
-  
-  // Если localhost недоступен или мы в продакшене - используем продакшн
-  cachedWSUrl = httpToWs(prodUrl)
-  return cachedWSUrl
-}
-
-// Для синхронного доступа (будет использован при первом подключении)
-const getWSUrlSync = () => {
-  if (import.meta.env.VITE_WS_URL) {
-    return import.meta.env.VITE_WS_URL
-  }
-  // По умолчанию пробуем localhost
-  return 'ws://localhost:5000'
 }
 
 export function useWebSocket(gameId, authToken) {
@@ -68,76 +18,30 @@ export function useWebSocket(gameId, authToken) {
   useEffect(() => {
     if (!gameId || !authToken) return
 
-    // Функция для создания подключения
-    const connectSocket = async () => {
-      // Получаем рабочий WebSocket URL
-      const wsUrl = await getWSUrl()
-      
-      // Создаем подключение
-      // Flask-SocketIO использует query параметры для game_id
-      const newSocket = io(wsUrl, {
-        auth: {
-          token: authToken,
-        },
-        query: {
-          game_id: gameId
-        },
-        transports: ['websocket', 'polling'],
-        reconnection: true,
-        reconnectionDelay: 1000,
-        reconnectionAttempts: 5,
-      })
+    const wsUrl = httpToWs(WS_URL)
+    const newSocket = io(wsUrl, {
+      auth: { token: authToken },
+      query: { game_id: gameId },
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+    })
 
-      newSocket.on('connect', () => {
-        console.log('WebSocket подключен к:', wsUrl)
-        setConnected(true)
-      })
+    newSocket.on('connect', () => {
+      console.log('WebSocket подключен')
+      setConnected(true)
+    })
 
-      newSocket.on('disconnect', () => {
-        console.log('WebSocket отключен')
-        setConnected(false)
-      })
+    newSocket.on('disconnect', () => {
+      console.log('WebSocket отключен')
+      setConnected(false)
+    })
 
-      newSocket.on('connect_error', async (error) => {
-        console.error('WebSocket ошибка подключения:', error)
-        
-        // Если ошибка и это localhost - пробуем продакшн
-        if (wsUrl.includes('localhost')) {
-          const prodUrl = httpToWs(import.meta.env.VITE_BACKEND_URL || 'https://seabatlle-tg.onrender.com')
-          if (prodUrl !== wsUrl) {
-            console.log('Пробуем подключиться к продакшн серверу:', prodUrl)
-            cachedWSUrl = null // Сбрасываем кэш
-            newSocket.disconnect()
-            
-            // Пробуем подключиться к продакшн
-            const prodSocket = io(prodUrl, {
-              auth: { token: authToken },
-              query: {
-                game_id: gameId
-              },
-              transports: ['websocket', 'polling'],
-            })
-            
-            prodSocket.on('connect', () => {
-              console.log('WebSocket подключен к продакшн:', prodUrl)
-              cachedWSUrl = prodUrl
-              setConnected(true)
-              socketRef.current = prodSocket
-              setSocket(prodSocket)
-            })
-          }
-        }
-      })
+    newSocket.on('connect_error', (error) => {
+      console.error('WebSocket ошибка:', error)
+    })
 
-      newSocket.on('error', (error) => {
-        console.error('WebSocket ошибка:', error)
-      })
-
-      socketRef.current = newSocket
-      setSocket(newSocket)
-    }
-
-    connectSocket()
+    socketRef.current = newSocket
+    setSocket(newSocket)
 
     return () => {
       if (socketRef.current) {
@@ -148,4 +52,3 @@ export function useWebSocket(gameId, authToken) {
 
   return { socket, connected }
 }
-

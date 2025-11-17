@@ -1,5 +1,3 @@
-import { useMemo } from 'react'
-
 const CELL_STATES = {
   EMPTY: '🌊',
   SHIP: '🟥',
@@ -8,110 +6,63 @@ const CELL_STATES = {
   DESTROYED: '❌',
 }
 
-export default function Board({
-  board,
-  size = 10,
-  interactive = false,
-  showShips = false,
-  onCellClick,
-  selectedCell = null,
-}) {
-  // Проверяем, что board существует и является массивом
+export default function Board({ board, size = 10, interactive = false, showShips = false, onCellClick }) {
   if (!board || !Array.isArray(board)) {
-    return (
-      <div className="p-4 text-center text-gray-500">
-        Загрузка поля...
-      </div>
-    )
+    return <div className="p-4 text-center text-gray-500">Загрузка...</div>
   }
 
-  const letters = useMemo(() => {
-    return Array.from({ length: size }, (_, i) => String.fromCharCode(65 + i))
-  }, [size])
-
-  const handleCellClick = (row, col) => {
+  const handleClick = (row, col) => {
     if (!interactive || !onCellClick) return
-    if (!board || !board[row]) return
-    
+    if (!board[row] || !board[row][col]) return
     const cell = board[row][col]
     if (cell !== CELL_STATES.EMPTY && cell !== '🌊') return
-    
     onCellClick(row, col)
   }
 
-  const getCellClass = (row, col, cell) => {
-    const baseClass = 'cell w-8 h-8 sm:w-10 sm:h-10 flex items-center justify-center text-xs sm:text-sm font-medium border border-gray-300 dark:border-gray-600 rounded transition-all'
+  const getCellContent = (row, col) => {
+    if (!board[row] || !board[row][col]) return CELL_STATES.EMPTY
+    return board[row][col]
+  }
+
+  const getCellClass = (row, col) => {
+    const cell = getCellContent(row, col)
+    let classes = 'w-10 h-10 flex items-center justify-center text-sm border border-gray-300 dark:border-gray-600 rounded'
     
-    if (selectedCell && selectedCell.row === row && selectedCell.col === col) {
-      return `${baseClass} ring-2 ring-blue-500 scale-110`
+    if (interactive && (cell === CELL_STATES.EMPTY || cell === '🌊')) {
+      classes += ' cursor-pointer hover:bg-blue-100 dark:hover:bg-blue-900'
     }
-
-    if (interactive && cell === CELL_STATES.EMPTY) {
-      return `${baseClass} cursor-pointer hover:bg-blue-100 dark:hover:bg-blue-900 active:scale-95`
-    }
-
+    
     if (cell === CELL_STATES.HIT || cell === '🔥') {
-      return `${baseClass} bg-red-500 text-white`
+      classes += ' bg-red-500 text-white'
+    } else if (cell === CELL_STATES.MISS || cell === '⚫') {
+      classes += ' bg-gray-400 dark:bg-gray-600'
+    } else if (cell === CELL_STATES.DESTROYED || cell === '❌') {
+      classes += ' bg-red-700 text-white'
+    } else if (showShips && (cell === CELL_STATES.SHIP || cell === '🟥')) {
+      classes += ' bg-blue-400 dark:bg-blue-600'
+    } else {
+      classes += ' bg-blue-50 dark:bg-gray-800'
     }
-
-    if (cell === CELL_STATES.MISS || cell === '⚫') {
-      return `${baseClass} bg-gray-400 dark:bg-gray-600`
-    }
-
-    if (cell === CELL_STATES.DESTROYED || cell === '❌') {
-      return `${baseClass} bg-red-700 text-white`
-    }
-
-    if (showShips && (cell === CELL_STATES.SHIP || cell === '🟥')) {
-      return `${baseClass} bg-blue-400 dark:bg-blue-600`
-    }
-
-    return `${baseClass} bg-blue-50 dark:bg-gray-800`
+    
+    return classes
   }
 
   return (
     <div className="inline-block p-2 bg-white dark:bg-gray-900 rounded-lg shadow-lg">
-      <div className="grid gap-0" style={{ gridTemplateColumns: `repeat(${size + 1}, minmax(0, 1fr))` }}>
-        {/* Пустая ячейка в углу */}
-        <div className="w-8 h-8 sm:w-10 sm:h-10"></div>
-        
-        {/* Буквы сверху */}
-        {letters.map((letter, col) => (
-          <div
-            key={`header-${col}`}
-            className="w-8 h-8 sm:w-10 sm:h-10 flex items-center justify-center text-xs sm:text-sm font-bold text-gray-700 dark:text-gray-300"
-          >
-            {letter}
-          </div>
-        ))}
-
-        {/* Строки с цифрами и клетками */}
-        {Array.from({ length: size }, (_, row) => (
-          <div key={`row-${row}`} className="contents">
-            {/* Номер строки */}
-            <div className="w-8 h-8 sm:w-10 sm:h-10 flex items-center justify-center text-xs sm:text-sm font-bold text-gray-700 dark:text-gray-300">
-              {row + 1}
-            </div>
-            
-            {/* Клетки поля */}
-            {Array.from({ length: size }, (_, col) => {
-              // Безопасное получение значения клетки
-              const cell = (board[row] && board[row][col]) ? board[row][col] : CELL_STATES.EMPTY
-              return (
-                <button
-                  key={`cell-${row}-${col}`}
-                  className={getCellClass(row, col, cell)}
-                  onClick={() => handleCellClick(row, col)}
-                  disabled={!interactive || (cell !== CELL_STATES.EMPTY && cell !== '🌊')}
-                >
-                  {cell}
-                </button>
-              )
-            })}
-          </div>
-        ))}
+      <div className="grid gap-0" style={{ gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))` }}>
+        {Array.from({ length: size }, (_, row) =>
+          Array.from({ length: size }, (_, col) => (
+            <button
+              key={`${row}-${col}`}
+              className={getCellClass(row, col)}
+              onClick={() => handleClick(row, col)}
+              disabled={!interactive}
+            >
+              {getCellContent(row, col)}
+            </button>
+          ))
+        )}
       </div>
     </div>
   )
 }
-

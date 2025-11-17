@@ -9,12 +9,10 @@ export function useTelegramAuth() {
   useEffect(() => {
     const initAuth = async () => {
       try {
-        // Получаем данные из Telegram WebApp
         if (window.Telegram?.WebApp?.initDataUnsafe?.user) {
           const tgUser = window.Telegram.WebApp.initDataUnsafe.user
           const initData = window.Telegram.WebApp.initData
 
-          // Отправляем на сервер для валидации и получения токена
           const response = await api.post('/api/auth', {
             init_data: initData,
             user: tgUser,
@@ -23,12 +21,8 @@ export function useTelegramAuth() {
           setUser(tgUser)
           setAuthToken(response.token)
         } else {
-          // Для разработки (если не в Telegram)
-          const devUser = {
-            id: 123456,
-            first_name: 'Dev User',
-            username: 'dev_user',
-          }
+          // Для разработки
+          const devUser = { id: 123456, first_name: 'Dev', username: 'dev' }
           setUser(devUser)
           setAuthToken('dev_token')
         }
@@ -44,4 +38,3 @@ export function useTelegramAuth() {
 
   return { user, authToken, loading }
 }
-
