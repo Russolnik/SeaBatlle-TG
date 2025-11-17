@@ -7,7 +7,6 @@ from typing import Optional, Literal
 from threading import Thread
 
 from flask import Flask, request, jsonify
-from flask_cors import CORS
 from flask_socketio import SocketIO, emit, disconnect
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, BotCommand
@@ -88,37 +87,43 @@ def is_origin_allowed(origin):
     
     return False
 
-# Настройка CORS
-CORS(app, 
-     resources={
-         r"/api/*": {
-             "origins": "*",  # Временно разрешаем все для отладки
-             "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-             "allow_headers": ["Content-Type", "Authorization", "X-Requested-With"],
-             "expose_headers": ["Content-Type"],
-             "max_age": 3600
-         }
-     })
+# Настройка CORS - используем только ручную обработку, чтобы избежать дублирования заголовков
+# Flask-CORS отключен для API endpoints, используем только after_request
 
 # Добавляем обработчик для добавления CORS заголовков вручную
 @app.after_request
 def after_request(response):
     """Добавляем CORS заголовки к каждому ответу"""
-    origin = request.headers.get('Origin', '')
-    
-    # Проверяем origin
-    if is_origin_allowed(origin) or not origin:
-        response.headers.add('Access-Control-Allow-Origin', origin if origin else '*')
-        response.headers.add('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH')
-        response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With')
-        response.headers.add('Access-Control-Allow-Credentials', 'true')
-        response.headers.add('Access-Control-Max-Age', '3600')
-    else:
-        # Если origin не разрешен, все равно добавляем заголовки для отладки
-        response.headers.add('Access-Control-Allow-Origin', origin)
-        response.headers.add('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH')
-        response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With')
-        response.headers.add('Access-Control-Allow-Credentials', 'true')
+    # Проверяем, является ли запрос к API
+    if request.path.startswith('/api/'):
+        origin = request.headers.get('Origin', '')
+        
+        # Удаляем все существующие CORS заголовки, чтобы избежать дублирования
+        cors_headers_to_remove = [
+            'Access-Control-Allow-Origin',
+            'Access-Control-Allow-Methods',
+            'Access-Control-Allow-Headers',
+            'Access-Control-Allow-Credentials',
+            'Access-Control-Max-Age'
+        ]
+        for header in cors_headers_to_remove:
+            if header in response.headers:
+                del response.headers[header]
+        
+        # Проверяем origin
+        if is_origin_allowed(origin) or not origin:
+            # Устанавливаем заголовки только один раз
+            response.headers['Access-Control-Allow-Origin'] = origin if origin else '*'
+            response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH'
+            response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With'
+            response.headers['Access-Control-Allow-Credentials'] = 'true'
+            response.headers['Access-Control-Max-Age'] = '3600'
+        else:
+            # Если origin не разрешен, все равно добавляем заголовки для отладки
+            response.headers['Access-Control-Allow-Origin'] = origin
+            response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH'
+            response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With'
+            response.headers['Access-Control-Allow-Credentials'] = 'true'
     
     return response
 
@@ -174,15 +179,8 @@ def validate_telegram_init_data(init_data: str) -> Optional[dict]:
 def api_auth():
     """Авторизация через Telegram WebApp"""
     if request.method == 'OPTIONS':
-        # Обработка preflight запроса
-        origin = request.headers.get('Origin', '*')
-        response = jsonify({})
-        response.headers.add('Access-Control-Allow-Origin', origin)
-        response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With')
-        response.headers.add('Access-Control-Allow-Methods', 'POST, OPTIONS')
-        response.headers.add('Access-Control-Allow-Credentials', 'true')
-        response.headers.add('Access-Control-Max-Age', '3600')
-        return response, 200
+        # Обработка preflight запроса - заголовки добавятся через after_request
+        return jsonify({}), 200
     
     try:
         data = request.json
@@ -191,25 +189,18 @@ def api_auth():
         
         # Валидация (упрощенная - для продакшена нужна полная проверка)
         if not user_data or 'id' not in user_data:
-            response = jsonify({'error': 'Invalid user data'})
-            response.headers.add('Access-Control-Allow-Origin', request.headers.get('Origin', '*'))
-            return response, 400
+            return jsonify({'error': 'Invalid user data'}), 400
         
         # Генерируем простой токен (в продакшене использовать JWT)
         token = f"token_{user_data['id']}_{uuid.uuid4().hex[:16]}"
         
-        result = jsonify({
+        return jsonify({
             'token': token,
             'user': user_data
-        })
-        result.headers.add('Access-Control-Allow-Origin', request.headers.get('Origin', '*'))
-        result.headers.add('Access-Control-Allow-Credentials', 'true')
-        return result, 200
+        }), 200
     except Exception as e:
         logger.error(f"Ошибка авторизации: {e}")
-        response = jsonify({'error': str(e)})
-        response.headers.add('Access-Control-Allow-Origin', request.headers.get('Origin', '*'))
-        return response, 500
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/game/create', methods=['POST'])
 def api_create_game():
@@ -257,32 +248,20 @@ def api_create_game():
 def api_get_game_state(game_id):
     """Получить состояние игры"""
     if request.method == 'OPTIONS':
-        origin = request.headers.get('Origin', '*')
-        response = jsonify({})
-        response.headers.add('Access-Control-Allow-Origin', origin)
-        response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-        response.headers.add('Access-Control-Allow-Methods', 'GET, OPTIONS')
-        response.headers.add('Access-Control-Allow-Credentials', 'true')
-        return response, 200
+        # Обработка preflight запроса - заголовки добавятся через after_request
+        return jsonify({}), 200
     
     try:
         player_id = request.args.get('player_id', 'p1')
         
         if game_id not in games:
-            response = jsonify({'error': 'Game not found'})
-            response.headers.add('Access-Control-Allow-Origin', request.headers.get('Origin', '*'))
-            return response, 404
+            return jsonify({'error': 'Game not found'}), 404
         
         game = games[game_id]
-        result = jsonify(serialize_game_state(game, player_id))
-        result.headers.add('Access-Control-Allow-Origin', request.headers.get('Origin', '*'))
-        result.headers.add('Access-Control-Allow-Credentials', 'true')
-        return result, 200
+        return jsonify(serialize_game_state(game, player_id)), 200
     except Exception as e:
         logger.error(f"Ошибка получения состояния: {e}")
-        response = jsonify({'error': str(e)})
-        response.headers.add('Access-Control-Allow-Origin', request.headers.get('Origin', '*'))
-        return response, 500
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/game/<game_id>/join', methods=['POST'])
 def api_join_game(game_id):
