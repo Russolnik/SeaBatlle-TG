@@ -358,9 +358,13 @@ def api_attack(game_id):
         if 'error' in result:
             return jsonify({'error': result['error']}), 400
         
-        # Меняем ход только при промахе
+        # Меняем ход только при промахе (при попадании ход остается у атакующего)
         if not result.get('hit', False):
-            game.current_player = 'p2' if player_id == 'p1' else 'p1'
+            opponent_id = 'p2' if player_id == 'p1' else 'p1'
+            game.current_player = opponent_id
+            logger.info(f"API: Ход передан от {player_id} к {opponent_id} (промах)")
+        else:
+            logger.info(f"API: Ход остается у {player_id} (попадание)")
         
         # Обновляем время последнего хода
         game.last_move_time = datetime.now().timestamp()
@@ -374,10 +378,15 @@ def api_attack(game_id):
             'player_id': player_id,
             'row': row,
             'col': col,
-            'result': result
+            'result': result,
+            'current_player': game.current_player
         }, room=f'game_{game_id}')
-        socketio.emit('game_state', serialize_game_state(game, 'p1'), room=f'game_{game_id}')
-        socketio.emit('game_state', serialize_game_state(game, 'p2'), room=f'game_{game_id}')
+        
+        # Отправляем обновленное состояние обоим игрокам
+        state_p1 = serialize_game_state(game, 'p1')
+        state_p2 = serialize_game_state(game, 'p2')
+        socketio.emit('game_state', state_p1, room=f'game_{game_id}')
+        socketio.emit('game_state', state_p2, room=f'game_{game_id}')
         
         return jsonify({
             'result': result,

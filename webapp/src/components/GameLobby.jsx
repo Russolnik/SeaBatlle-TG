@@ -47,8 +47,9 @@ export default function GameLobby({ gameId, onCreateGame, user }) {
 
   // Если есть gameId - показываем ожидание
   if (gameId) {
-    // Ссылка должна вести в бота
-    const shareLink = `https://t.me/${botUsername.replace('@', '')}?start=join_${gameId}`
+    // Ссылка должна вести в бота (убираем @ если есть)
+    const cleanBotUsername = botUsername.replace('@', '')
+    const shareLink = `https://t.me/${cleanBotUsername}?start=join_${gameId}`
 
     return (
       <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-blue-50 to-blue-100 dark:from-gray-900 dark:to-gray-800">

@@ -15,6 +15,11 @@ export default function GameSetup({ gameState, playerId, onStateUpdate, socket }
     return <div className="flex items-center justify-center min-h-screen">Ошибка: игрок не найден</div>
   }
 
+  // Проверяем наличие board
+  if (!myPlayer.board || !Array.isArray(myPlayer.board) || myPlayer.board.length === 0) {
+    return <div className="flex items-center justify-center min-h-screen">Загрузка поля...</div>
+  }
+
   const handleAutoPlace = async () => {
     try {
       setPlacing(true)
@@ -57,24 +62,22 @@ export default function GameSetup({ gameState, playerId, onStateUpdate, socket }
   const shipsToPlace = gameState.ships_to_place || []
 
   return (
-    <div className="min-h-screen p-4 pb-20 bg-gradient-to-br from-blue-50 to-blue-100 dark:from-gray-900 dark:to-gray-800">
-      <div className="max-w-3xl mx-auto">
-        <h1 className="text-3xl font-bold mb-6 text-center text-gray-800 dark:text-gray-200">
-          Расстановка кораблей
-        </h1>
+    <div className="min-h-screen p-4 pb-20">
+      <div className="max-w-2xl mx-auto">
+        <h1 className="text-2xl font-bold mb-4 text-center">Расстановка кораблей</h1>
 
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-6 mb-6">
-          <h2 className="text-lg font-bold mb-4 text-gray-800 dark:text-gray-200">Корабли для размещения:</h2>
-          <div className="flex flex-wrap gap-3">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-4 mb-4">
+          <h2 className="text-lg font-bold mb-2">Корабли для размещения:</h2>
+          <div className="flex flex-wrap gap-2">
             {shipsToPlace.map((ship, idx) => (
               <button
                 key={idx}
                 onClick={() => setPlacingShip(ship.size)}
                 disabled={placing}
-                className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                className={`px-4 py-2 rounded ${
                   placingShip === ship.size
-                    ? 'bg-blue-500 text-white shadow-lg scale-105'
-                    : 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600'
+                    ? 'bg-blue-500 text-white'
+                    : 'bg-gray-200 dark:bg-gray-700'
                 } disabled:opacity-50`}
               >
                 {ship.size}×{ship.count}
@@ -83,23 +86,21 @@ export default function GameSetup({ gameState, playerId, onStateUpdate, socket }
           </div>
         </div>
 
-        <div className="flex justify-center mb-6">
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-4">
-            <Board
-              board={myPlayer.board}
-              size={gameState.config?.size || 10}
-              showShips={true}
-              interactive={!!placingShip && !placing}
-              onCellClick={handlePlaceShip}
-            />
-          </div>
+        <div className="flex justify-center mb-4">
+          <Board
+            board={myPlayer.board}
+            size={gameState.config?.size || 10}
+            showShips={true}
+            interactive={!!placingShip && !placing}
+            onCellClick={handlePlaceShip}
+          />
         </div>
 
-        <div className="flex justify-center gap-4">
+        <div className="flex justify-center">
           <button
             onClick={handleAutoPlace}
             disabled={placing}
-            className="px-8 py-4 bg-green-500 text-white rounded-xl hover:bg-green-600 disabled:opacity-50 shadow-lg font-semibold transition-all"
+            className="px-6 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:opacity-50"
           >
             {placing ? 'Расстановка...' : '🎲 Авто-расстановка'}
           </button>
