@@ -16,10 +16,11 @@ function App() {
   const { user, authToken, loading: authLoading } = useTelegramAuth()
   const { socket, connected } = useWebSocket(gameId, authToken)
 
-  // Получаем gameId из URL или localStorage
+  // Получаем gameId и group_id из URL или localStorage
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const urlGameId = params.get('gameId')
+    const urlGroupId = params.get('group_id')
     
     if (urlGameId) {
       setGameId(urlGameId)
@@ -31,6 +32,11 @@ function App() {
       if (savedGameId) {
         setGameId(savedGameId)
       }
+    }
+    
+    // Сохраняем group_id в localStorage для использования при создании игры
+    if (urlGroupId) {
+      localStorage.setItem('group_id', urlGroupId)
     }
   }, [])
 
@@ -121,15 +127,23 @@ function App() {
       const p2 = state.players?.p2
       const isInGame = (p1?.user_id === user.id) || (p2?.user_id === user.id)
       
-      if (!isInGame && state.phase === 'lobby') {
-        // Присоединяемся к игре
-        const joinRes = await api.post(`/api/game/${gameId}/join`, {
-          user_id: user.id,
-          username: user.username || user.first_name || `user_${user.id}`
-        })
-        setPlayerId(joinRes.player_id)
-        setGameState(joinRes.game_state)
-        localStorage.setItem('activeGameId', gameId)
+      if (!isInGame && (!p2 || !p2.user_id)) {
+        // Присоединяемся к игре, если есть место
+        try {
+          const joinRes = await api.post(`/api/game/${gameId}/join`, {
+            user_id: user.id,
+            username: user.username || user.first_name || `user_${user.id}`
+          })
+          setPlayerId(joinRes.player_id)
+          setGameState(joinRes.game_state)
+          localStorage.setItem('activeGameId', gameId)
+        } catch (joinErr) {
+          // Если не удалось присоединиться (игра заполнена), просто загружаем состояние
+          setGameState(state)
+          if (p1?.user_id === user.id) setPlayerId('p1')
+          else if (p2?.user_id === user.id) setPlayerId('p2')
+          localStorage.setItem('activeGameId', gameId)
+        }
       } else {
         setGameState(state)
         if (p1?.user_id === user.id) setPlayerId('p1')
@@ -166,11 +180,18 @@ function App() {
       setLoading(true)
       setError(null)
       
+      // Получаем group_id из URL или localStorage
+      const params = new URLSearchParams(window.location.search)
+      const urlGroupId = params.get('group_id')
+      const savedGroupId = localStorage.getItem('group_id')
+      const group_id = urlGroupId || savedGroupId || null
+      
       const res = await api.post('/api/game/create', {
         mode,
         is_timed,
         user_id: user.id,
-        username: user.username || user.first_name || `user_${user.id}`
+        username: user.username || user.first_name || `user_${user.id}`,
+        group_id: group_id
       })
       
       setGameId(res.game_id)

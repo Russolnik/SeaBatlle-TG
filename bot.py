@@ -208,6 +208,7 @@ def api_create_game():
         mode = data.get('mode', 'full')  # По умолчанию full (10×10)
         is_timed = data.get('is_timed', False)
         user_id = data.get('user_id')
+        group_id = data.get('group_id')  # Получаем group_id из запроса
         
         if not user_id:
             return jsonify({'error': 'User ID required'}), 400
@@ -237,12 +238,19 @@ def api_create_game():
             else:  # full
                 time_limit = 180  # 3 минуты на ход для полного режима
         
+        # Преобразуем group_id в int, если он передан как строка
+        if group_id:
+            try:
+                group_id = int(group_id)
+            except (ValueError, TypeError):
+                group_id = None
+        
         game = GameState(
             id=game_id,
             mode=mode,
             is_timed=is_timed,
             time_limit=time_limit,
-            group_id=None
+            group_id=group_id
         )
         
         # Создаем первого игрока
@@ -255,7 +263,74 @@ def api_create_game():
         
         game.players['p1'] = p1
         games[game_id] = game
-        logger.info(f"API: Игра {game_id} создана через Mini App (mode={mode}, timed={is_timed}). Активных игр: {len(games)}")
+        logger.info(f"API: Игра {game_id} создана через Mini App (mode={mode}, timed={is_timed}, group_id={group_id}). Активных игр: {len(games)}")
+        
+        # Отправляем приглашение в группу, если игра создана в группе
+        if group_id:
+            import asyncio
+            
+            async def send_group_invitation():
+                try:
+                    bot_info_dict = await get_bot_info()
+                    bot_username = bot_info_dict.get('username', '')
+                    
+                    if not bot_username:
+                        logger.error(f"Не удалось получить username бота для игры {game_id}")
+                        bot_username = "your_bot_username"  # Fallback
+                    
+                    group_text = f"🎮 Новая игра «Морской бой»!\n\n"
+                    group_text += f"👤 Создатель: @{p1.username}\n"
+                    group_text += f"🆔 ID игры: {game_id}\n\n"
+                    
+                    mode_names = {
+                        'full': 'Классика (10×10)',
+                        'classic': 'Обычный (8×8)',
+                        'fast': 'Быстрый (6×6)'
+                    }
+                    group_text += f"📋 Режим: {mode_names.get(mode, mode)}\n"
+                    group_text += f"⏱ Таймер: {'Включен' if is_timed else 'Выключен'}\n\n"
+                    group_text += f"⏳ Ожидание второго игрока...\n\n"
+                    group_text += f"Нажмите кнопку ниже, чтобы присоединиться!"
+                    
+                    from aiogram.types import InlineKeyboardButton, WebAppInfo, InlineKeyboardMarkup
+                    
+                    webapp_url = os.getenv("WEBAPP_URL", "https://seabatl.netlify.app")
+                    
+                    # Кнопка присоединения через ссылку
+                    join_url = f"https://t.me/{bot_username}?start=join_{game_id}"
+                    
+                    group_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                        [
+                            InlineKeyboardButton(
+                                text="🎮 Присоединиться к игре",
+                                url=join_url
+                            )
+                        ],
+                        [
+                            InlineKeyboardButton(
+                                text="🎮 Открыть приложение",
+                                web_app=WebAppInfo(url=f"{webapp_url}?gameId={game_id}&bot={bot_username}")
+                            )
+                        ]
+                    ])
+                    
+                    logger.info(f"Попытка отправить приглашение в группу {group_id} для игры {game_id}, bot_username: {bot_username}")
+                    group_msg = await bot.send_message(
+                        chat_id=group_id,
+                        text=group_text,
+                        reply_markup=group_keyboard
+                    )
+                    game.group_messages.append(group_msg.message_id)
+                    logger.info(f"✅ Приглашение успешно отправлено в группу {group_id}, message_id: {group_msg.message_id}")
+                except Exception as e:
+                    logger.error(f"❌ Ошибка отправки приглашения в группу {group_id}: {e}", exc_info=True)
+            
+            # Вызываем асинхронную функцию из синхронного контекста
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(send_group_invitation())
+            else:
+                loop.run_until_complete(send_group_invitation())
         
         return jsonify({
             'game_id': game_id,
@@ -1224,85 +1299,67 @@ async def start_battle(game: GameState):
 
 @dp.message(Command("play"))
 async def cmd_play(message: Message):
-    """Команда /play - создать игру"""
+    """Команда /play - открыть Mini App для создания игры"""
     # Проверяем, не участвует ли пользователь уже в активной игре
-    # ВАЖНО: разрешаем несколько игр в одной группе, но один пользователь может играть только в одной игре
     existing = get_game_by_user(message.from_user.id)
     if existing:
         game_id, game, player_id = existing
         # Проверяем, не завершена ли игра
         if not game.winner and not game.surrendered:
-            await message.answer("❌ Вы уже участвуете в активной игре! Завершите текущую игру перед созданием новой.\n\nИспользуйте /stop для отмены игры или кнопку 'Сдаться' во время боя.")
-            # Удаляем сообщение команды
+            # Показываем кнопку для продолжения существующей игры
+            webapp_url = os.getenv("WEBAPP_URL", "https://seabatl.netlify.app")
+            bot_info = await bot.get_me()
+            from aiogram.types import InlineKeyboardButton, WebAppInfo, InlineKeyboardMarkup
+            
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="🎮 Открыть приложение",
+                        web_app=WebAppInfo(url=f"{webapp_url}?gameId={game_id}&bot={bot_info.username}")
+                    )
+                ]
+            ])
+            
+            await message.answer(
+                "❌ Вы уже участвуете в активной игре!\n\n"
+                "Откройте Mini App для продолжения игры или используйте /stop для отмены.",
+                reply_markup=keyboard
+            )
             try:
                 await message.delete()
             except:
                 pass
             return
         else:
-            # Если игра завершена, удаляем её и позволяем создать новую
+            # Если игра завершена, удаляем её
             logger.info(f"Удалена завершенная игра {game_id} перед созданием новой")
             if game.id in games:
                 del games[game.id]
     
-    # Логируем создание игры
-    logger.info(f"Создание новой игры пользователем {message.from_user.id} (@{message.from_user.username})")
-    
-    game_id = str(uuid.uuid4())[:8]
-    config = get_ship_config('full')  # По умолчанию - классика 10×10
-    
-    # Сохраняем group_id только если это группа
-    group_id = message.chat.id if message.chat.type != "private" else None
-    
-    game = GameState(
-        id=game_id,
-        mode='full',  # По умолчанию - классика 10×10
-        is_timed=False,
-        group_id=group_id
-    )
-    
-    # Используем данные пользователя из Telegram
-    user = message.from_user
-    p1 = Player(
-        user_id=user.id,
-        username=user.username or user.first_name or f"user_{user.id}",
-        board=create_empty_board(config['size']),
-        attacks=create_empty_attacks(config['size'])
-    )
-    
-    game.players['p1'] = p1
-    games[game_id] = game
-    logger.info(f"Игра {game_id} создана. Активных игр: {len(games)}, group_id: {group_id}, chat_type: {message.chat.type}")
-    
-    # Упрощенное сообщение - только кнопка Mini App
-    text = f"🎮 Новая игра создана!\n\n"
-    text += f"Создатель: @{p1.username}\n"
-    text += f"ID игры: {game_id}\n\n"
-    text += f"Откройте Mini App для выбора режима и начала игры!"
-    
-    # Получаем URL для Mini App
+    # Просто показываем кнопку Mini App для создания игры
+    # Игра будет создана через API после выбора режима в Mini App
     webapp_url = os.getenv("WEBAPP_URL", "https://seabatl.netlify.app")
-    
-    # Получаем username бота для ссылок
     bot_info = await bot.get_me()
     
-    # Создаем клавиатуру только с кнопкой Mini App
+    # Определяем group_id для передачи в Mini App
+    group_id = message.chat.id if message.chat.type != "private" else None
+    webapp_params = f"?group_id={group_id}&bot={bot_info.username}" if group_id else f"?bot={bot_info.username}"
+    
     from aiogram.types import InlineKeyboardButton, WebAppInfo, InlineKeyboardMarkup
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(
                 text="🎮 Открыть приложение",
-                web_app=WebAppInfo(url=f"{webapp_url}?gameId={game_id}&bot={bot_info.username}")
+                web_app=WebAppInfo(url=f"{webapp_url}{webapp_params}")
             )
         ]
     ])
     
-    logger.info(f"Создана кнопка Mini App для игры {game_id}, URL: {webapp_url}?gameId={game_id}")
+    text = "🎮 Создать новую игру\n\n"
+    text += "Откройте Mini App для выбора режима игры и создания новой игры!"
     
-    # Отправляем сообщение создателю
-    msg = await message.answer(text, reply_markup=keyboard)
-    game.setup_message_id = msg.message_id
+    await message.answer(text, reply_markup=keyboard)
     
     # Удаляем сообщение команды
     try:
@@ -1310,49 +1367,7 @@ async def cmd_play(message: Message):
     except:
         pass
     
-    # Если игра в группе, отправляем приглашение в группу
-    if game.group_id:
-        try:
-            # Получаем username бота (bot_info - это объект User из aiogram)
-            bot_username = bot_info.username
-            if not bot_username:
-                bot_info_dict = await get_bot_info()
-                bot_username = bot_info_dict.get('username', '')
-            
-            if not bot_username:
-                logger.error(f"Не удалось получить username бота для игры {game_id}")
-                bot_username = "your_bot_username"  # Fallback
-            
-            group_text = f"🎮 Новая игра «Морской бой»!\n\n"
-            group_text += f"👤 Создатель: @{p1.username}\n"
-            group_text += f"🆔 ID игры: {game_id}\n\n"
-            group_text += f"⏳ Ожидание второго игрока...\n\n"
-            group_text += f"Нажмите кнопку ниже, чтобы присоединиться!"
-            
-            # Клавиатура с кнопкой присоединения
-            from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-            join_url = f"https://t.me/{bot_username}?start=join_{game_id}"
-            logger.info(f"Создание кнопки присоединения: {join_url}")
-            
-            group_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text="🎮 Присоединиться к игре",
-                        url=join_url
-                    )
-                ]
-            ])
-            
-            logger.info(f"Попытка отправить сообщение в группу {game.group_id} для игры {game_id}, bot_username: {bot_username}")
-            group_msg = await bot.send_message(
-                chat_id=game.group_id,
-                text=group_text,
-                reply_markup=group_keyboard
-            )
-            game.group_messages.append(group_msg.message_id)
-            logger.info(f"✅ Сообщение успешно отправлено в группу {game.group_id}, message_id: {group_msg.message_id}, всего сообщений в группе: {len(game.group_messages)}")
-        except Exception as e:
-            logger.error(f"❌ Ошибка отправки сообщения в группу {game.group_id}: {e}", exc_info=True)
+    # Приглашение в группу будет отправлено после создания игры через API
 
 
 @dp.message(Command("start"))
