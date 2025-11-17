@@ -32,4 +32,3 @@ export default defineConfig({
   },
   base: '/'  // Важно для Netlify
 })
-
