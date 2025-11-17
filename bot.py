@@ -205,20 +205,43 @@ def api_create_game():
     """Создать новую игру"""
     try:
         data = request.json
-        mode = data.get('mode', 'classic')
+        mode = data.get('mode', 'full')  # По умолчанию full (10×10)
         is_timed = data.get('is_timed', False)
-        user_id = data.get('user_id')  # Из токена или заголовка
+        user_id = data.get('user_id')
         
         if not user_id:
             return jsonify({'error': 'User ID required'}), 400
         
+        # Проверяем, не участвует ли пользователь уже в активной игре
+        existing = get_game_by_user(user_id)
+        if existing:
+            game_id, game, player_id = existing
+            # Проверяем, не завершена ли игра
+            if not game.winner and not game.surrendered:
+                return jsonify({
+                    'game_id': game_id,
+                    'player_id': player_id,
+                    'game_state': serialize_game_state(game, player_id)
+                }), 200
+        
         game_id = str(uuid.uuid4())[:8]
         config = get_ship_config(mode)
+        
+        # Устанавливаем таймер в зависимости от режима
+        time_limit = 0
+        if is_timed:
+            if mode == 'fast':
+                time_limit = 60  # 1 минута на ход для быстрого режима
+            elif mode == 'classic':
+                time_limit = 120  # 2 минуты на ход для обычного режима
+            else:  # full
+                time_limit = 180  # 3 минуты на ход для полного режима
         
         game = GameState(
             id=game_id,
             mode=mode,
             is_timed=is_timed,
+            time_limit=time_limit,
             group_id=None
         )
         
@@ -232,7 +255,7 @@ def api_create_game():
         
         game.players['p1'] = p1
         games[game_id] = game
-        logger.info(f"API: Игра {game_id} создана через Mini App. Активных игр: {len(games)}")
+        logger.info(f"API: Игра {game_id} создана через Mini App (mode={mode}, timed={is_timed}). Активных игр: {len(games)}")
         
         return jsonify({
             'game_id': game_id,
@@ -240,7 +263,7 @@ def api_create_game():
             'game_state': serialize_game_state(game, 'p1')
         }), 200
     except Exception as e:
-        logger.error(f"Ошибка создания игры: {e}")
+        logger.error(f"Ошибка создания игры: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/game/<game_id>/state', methods=['GET', 'OPTIONS'])
@@ -1137,40 +1160,33 @@ async def cmd_play(message: Message):
     games[game_id] = game
     logger.info(f"Игра {game_id} создана. Активных игр: {len(games)}, group_id: {group_id}, chat_type: {message.chat.type}")
     
-    if message.chat.type == "private":
-        text = f"🎮 Новая игра создана!\n\n"
-        text += f"Создатель: @{p1.username}\n"
-        text += f"ID игры: {game_id}\n\n"
-        text += f"Выберите режим игры. После настройки вы получите ссылку для приглашения друга."
-    else:
-        text = f"🎮 Новая игра создана!\n\n"
-        text += f"Создатель: @{p1.username}\n"
-        text += f"ID игры: {game_id}\n\n"
-        text += f"Режим: Обычный (8×8) или Быстрый (6×6)\n"
-        text += f"Выберите режим:"
+    # Упрощенное сообщение - только кнопка Mini App
+    text = f"🎮 Новая игра создана!\n\n"
+    text += f"Создатель: @{p1.username}\n"
+    text += f"ID игры: {game_id}\n\n"
+    text += f"Откройте Mini App для выбора режима и начала игры!"
     
-    # Получаем URL для Mini App (из переменной окружения или используем дефолтный)
+    # Получаем URL для Mini App
     webapp_url = os.getenv("WEBAPP_URL", "https://seabatl.netlify.app")
     
     # Получаем username бота для ссылок
     bot_info = await bot.get_me()
     
-    # Создаем клавиатуру с выбором режима и кнопкой Mini App
-    from aiogram.types import InlineKeyboardButton, WebAppInfo
-    mode_keyboard = get_mode_keyboard(game.mode, game.is_timed if game.is_timed else None)
+    # Создаем клавиатуру только с кнопкой Mini App
+    from aiogram.types import InlineKeyboardButton, WebAppInfo, InlineKeyboardMarkup
     
-    # Добавляем кнопку Mini App с правильным gameId и mode
-    if mode_keyboard.inline_keyboard:
-        mode_keyboard.inline_keyboard.append([
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
             InlineKeyboardButton(
-                text="🌐 Играть в веб-версии",
-                web_app=WebAppInfo(url=f"{webapp_url}?gameId={game_id}&mode={game.mode}&bot={bot_info.username}")
+                text="🎮 Открыть приложение",
+                web_app=WebAppInfo(url=f"{webapp_url}?gameId={game_id}&bot={bot_info.username}")
             )
-        ])
+        ]
+    ])
     
-    logger.info(f"Создана кнопка Mini App для игры {game_id}, URL: {webapp_url}?gameId={game_id}&mode={game.mode}")
+    logger.info(f"Создана кнопка Mini App для игры {game_id}, URL: {webapp_url}?gameId={game_id}")
     
-    msg = await message.answer(text, reply_markup=mode_keyboard)
+    msg = await message.answer(text, reply_markup=keyboard)
     game.setup_message_id = msg.message_id
     
     # Удаляем сообщение команды

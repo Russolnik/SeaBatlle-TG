@@ -1,27 +1,16 @@
-const CELL_STATES = {
-  EMPTY: '🌊',
-  SHIP: '🟥',
-  HIT: '🔥',
-  MISS: '⚫',
-  DESTROYED: '❌',
-}
-
 export default function Board({ board, size = 10, interactive = false, showShips = false, onCellClick }) {
   // Проверяем, что board существует и является массивом
   if (!board || !Array.isArray(board) || board.length === 0) {
     // Создаем пустую доску для отображения
-    const emptyBoard = Array.from({ length: size }, () => Array.from({ length: size }, () => '🌊'))
     return (
-      <div className="inline-block p-3 bg-gradient-to-br from-sky-50 to-blue-100 dark:from-gray-800 dark:to-gray-900 rounded-xl shadow-lg border-2 border-blue-200 dark:border-blue-700">
+      <div className="inline-block p-4 bg-gradient-to-br from-sky-100 via-blue-50 to-cyan-50 dark:from-gray-800 dark:via-gray-800 dark:to-gray-900 rounded-2xl shadow-2xl border-4 border-blue-300 dark:border-blue-700">
         <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))` }}>
           {Array.from({ length: size }, (_, row) =>
             Array.from({ length: size }, (_, col) => (
               <div
                 key={`${row}-${col}`}
-                className="w-8 h-8 sm:w-10 sm:h-10 flex items-center justify-center text-xs sm:text-sm border-2 border-blue-300 dark:border-blue-600 bg-blue-100 dark:bg-gray-700 rounded transition-all"
-              >
-                {emptyBoard[row][col]}
-              </div>
+                className="w-7 h-7 sm:w-9 sm:h-9 flex items-center justify-center border-2 border-blue-400 dark:border-blue-600 bg-blue-200 dark:bg-gray-700 rounded-md transition-all"
+              />
             ))
           )}
         </div>
@@ -35,42 +24,65 @@ export default function Board({ board, size = 10, interactive = false, showShips
     if (!interactive || !onCellClick) return
     if (!board[row] || !board[row][col]) return
     const cell = board[row][col]
-    if (cell !== CELL_STATES.EMPTY && cell !== '🌊') return
+    // Разрешаем клик только по пустым клеткам
+    if (cell !== '🌊' && cell !== '') return
     onCellClick(row, col)
   }
 
-  const getCellContent = (row, col) => {
-    if (!board[row] || !board[row][col]) return CELL_STATES.EMPTY
-    return board[row][col]
+  const getCellState = (row, col) => {
+    if (!board[row] || !board[row][col]) return 'empty'
+    const cell = board[row][col]
+    
+    if (cell === '🟥' || cell === 'ship') return 'ship'
+    if (cell === '🔥' || cell === 'hit') return 'hit'
+    if (cell === '⚫' || cell === 'miss') return 'miss'
+    if (cell === '❌' || cell === 'destroyed') return 'destroyed'
+    return 'empty'
   }
 
   const getCellClass = (row, col) => {
-    const cell = getCellContent(row, col)
-    let classes = 'w-8 h-8 sm:w-10 sm:h-10 flex items-center justify-center text-xs sm:text-sm border-2 rounded transition-all duration-150'
+    const state = getCellState(row, col)
+    let classes = 'w-7 h-7 sm:w-9 sm:h-9 flex items-center justify-center border-2 rounded-md transition-all duration-200 relative'
     
-    if (interactive && (cell === CELL_STATES.EMPTY || cell === '🌊')) {
-      classes += ' cursor-pointer hover:scale-110 hover:shadow-lg active:scale-95 border-blue-400 dark:border-blue-500 bg-blue-100 dark:bg-blue-900/30'
+    if (interactive && state === 'empty') {
+      classes += ' cursor-pointer hover:scale-110 hover:shadow-lg active:scale-95 border-blue-500 dark:border-blue-400 bg-blue-200 dark:bg-blue-900/40 hover:bg-blue-300 dark:hover:bg-blue-800/60'
     } else if (!interactive) {
-      classes += ' border-blue-300 dark:border-blue-600'
+      classes += ' border-blue-400 dark:border-blue-600'
     }
     
-    if (cell === CELL_STATES.HIT || cell === '🔥') {
-      classes += ' bg-red-500 dark:bg-red-600 border-red-600 dark:border-red-700 text-white font-bold shadow-lg'
-    } else if (cell === CELL_STATES.MISS || cell === '⚫') {
-      classes += ' bg-gray-400 dark:bg-gray-600 border-gray-500 dark:border-gray-500'
-    } else if (cell === CELL_STATES.DESTROYED || cell === '❌') {
-      classes += ' bg-red-700 dark:bg-red-800 border-red-800 dark:border-red-900 text-white font-bold shadow-lg'
-    } else if (showShips && (cell === CELL_STATES.SHIP || cell === '🟥')) {
-      classes += ' bg-blue-500 dark:bg-blue-600 border-blue-600 dark:border-blue-700 shadow-md'
-    } else {
-      classes += ' bg-blue-50 dark:bg-gray-800'
+    switch (state) {
+      case 'ship':
+        if (showShips) {
+          classes += ' bg-blue-600 dark:bg-blue-500 border-blue-700 dark:border-blue-600 shadow-md'
+          // Добавляем визуализацию корабля
+          classes += ' before:content-[""] before:absolute before:inset-0 before:bg-gradient-to-br before:from-blue-500 before:to-blue-700 before:rounded-md before:opacity-80'
+        } else {
+          classes += ' bg-blue-200 dark:bg-gray-700 border-blue-400 dark:border-blue-600'
+        }
+        break
+      case 'hit':
+        classes += ' bg-red-500 dark:bg-red-600 border-red-600 dark:border-red-700 shadow-lg'
+        // Крестик для попадания
+        classes += ' before:content-["✕"] before:text-white before:font-bold before:text-lg before:absolute'
+        break
+      case 'miss':
+        classes += ' bg-gray-300 dark:bg-gray-600 border-gray-400 dark:border-gray-500'
+        // Точка для промаха
+        classes += ' after:content-[""] after:absolute after:w-2 after:h-2 after:bg-gray-500 dark:after:bg-gray-400 after:rounded-full'
+        break
+      case 'destroyed':
+        classes += ' bg-red-700 dark:bg-red-800 border-red-800 dark:border-red-900 shadow-lg'
+        classes += ' before:content-["✕"] before:text-white before:font-bold before:text-xl before:absolute'
+        break
+      default:
+        classes += ' bg-blue-100 dark:bg-gray-800 border-blue-300 dark:border-blue-600'
     }
     
     return classes
   }
 
   return (
-    <div className="inline-block p-3 bg-gradient-to-br from-sky-50 to-blue-100 dark:from-gray-800 dark:to-gray-900 rounded-xl shadow-lg border-2 border-blue-200 dark:border-blue-700">
+    <div className="inline-block p-4 bg-gradient-to-br from-sky-100 via-blue-50 to-cyan-50 dark:from-gray-800 dark:via-gray-800 dark:to-gray-900 rounded-2xl shadow-2xl border-4 border-blue-300 dark:border-blue-700">
       <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${actualSize}, minmax(0, 1fr))` }}>
         {Array.from({ length: actualSize }, (_, row) =>
           Array.from({ length: actualSize }, (_, col) => (
@@ -78,11 +90,10 @@ export default function Board({ board, size = 10, interactive = false, showShips
               key={`${row}-${col}`}
               className={getCellClass(row, col)}
               onClick={() => handleClick(row, col)}
-              disabled={!interactive || (getCellContent(row, col) !== CELL_STATES.EMPTY && getCellContent(row, col) !== '🌊')}
+              disabled={!interactive || getCellState(row, col) !== 'empty'}
               type="button"
-            >
-              {getCellContent(row, col)}
-            </button>
+              aria-label={`Cell ${row}, ${col}`}
+            />
           ))
         )}
       </div>

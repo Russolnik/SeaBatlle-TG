@@ -154,13 +154,14 @@ function App() {
     }
   }
 
-  const createGame = async (mode) => {
+  const createGame = async (mode, is_timed = false) => {
     try {
       setLoading(true)
       setError(null)
       
       const res = await api.post('/api/game/create', {
         mode,
+        is_timed,
         user_id: user.id,
         username: user.username || user.first_name || `user_${user.id}`
       })

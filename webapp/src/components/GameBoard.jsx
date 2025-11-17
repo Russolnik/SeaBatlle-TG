@@ -79,14 +79,14 @@ export default function GameBoard({ gameState, playerId, onStateUpdate, socket }
   }
 
   return (
-    <div ref={containerRef} className="min-h-screen p-4 pb-20 bg-gradient-to-b from-blue-50 to-blue-100 dark:from-gray-900 dark:to-gray-800">
-      <div className="max-w-4xl mx-auto">
+    <div ref={containerRef} className="min-h-screen p-4 pb-20 bg-gradient-to-b from-blue-50 via-sky-50 to-cyan-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
+      <div className="max-w-5xl mx-auto">
         <GameInfo gameState={gameState} playerId={playerId} isMyTurn={isMyTurn} />
 
-        <div className="grid grid-cols-1 gap-6 mt-4">
+        <div className="grid grid-cols-1 gap-8 mt-6">
           {/* Поле противника - СВЕРХУ */}
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-4">
-            <h2 className="text-xl font-bold mb-3 text-center text-gray-800 dark:text-gray-200">
+          <div className="bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm rounded-2xl shadow-2xl p-6 border-4 border-blue-300 dark:border-blue-700">
+            <h2 className="text-2xl font-bold mb-4 text-center text-gray-800 dark:text-gray-200 drop-shadow-lg">
               🎯 Поле противника
             </h2>
             <div className="flex justify-center">
@@ -98,15 +98,15 @@ export default function GameBoard({ gameState, playerId, onStateUpdate, socket }
               />
             </div>
             {attacking && (
-              <div className="text-center mt-3 text-blue-600 dark:text-blue-400 text-sm font-medium">
+              <div className="text-center mt-4 text-blue-600 dark:text-blue-400 text-lg font-bold">
                 ⚡ Атака...
               </div>
             )}
           </div>
 
           {/* Ваше поле - СНИЗУ */}
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-4">
-            <h2 className="text-xl font-bold mb-3 text-center text-gray-800 dark:text-gray-200">
+          <div className="bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm rounded-2xl shadow-2xl p-6 border-4 border-blue-300 dark:border-blue-700">
+            <h2 className="text-2xl font-bold mb-4 text-center text-gray-800 dark:text-gray-200 drop-shadow-lg">
               📍 Ваше поле
             </h2>
             <div className="flex justify-center">
@@ -119,11 +119,11 @@ export default function GameBoard({ gameState, playerId, onStateUpdate, socket }
           </div>
         </div>
 
-        <div className="mt-6 flex justify-center">
+        <div className="mt-8 flex justify-center">
           <button
             onClick={handleSurrender}
             disabled={attacking}
-            className="px-8 py-3 bg-red-500 text-white rounded-xl hover:bg-red-600 disabled:opacity-50 shadow-lg font-semibold transition-all"
+            className="px-10 py-4 bg-red-500 text-white rounded-xl hover:bg-red-600 disabled:opacity-50 shadow-2xl font-bold text-lg transition-all hover:scale-105 active:scale-95"
           >
             🚩 Сдаться
           </button>

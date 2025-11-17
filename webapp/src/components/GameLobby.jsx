@@ -3,6 +3,7 @@ import { api } from '../utils/api'
 
 export default function GameLobby({ gameId, onCreateGame, user }) {
   const [selectedMode, setSelectedMode] = useState('full')
+  const [selectedTimer, setSelectedTimer] = useState(false)
   const [creating, setCreating] = useState(false)
   const [botUsername, setBotUsername] = useState('your_bot_username')
 
@@ -37,7 +38,7 @@ export default function GameLobby({ gameId, onCreateGame, user }) {
     if (creating) return
     setCreating(true)
     try {
-      await onCreateGame(selectedMode)
+      await onCreateGame(selectedMode, selectedTimer)
     } catch (err) {
       console.error('Ошибка:', err)
     } finally {
@@ -52,18 +53,20 @@ export default function GameLobby({ gameId, onCreateGame, user }) {
     const shareLink = `https://t.me/${cleanBotUsername}?start=join_${gameId}`
 
     return (
-      <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-blue-50 to-blue-100 dark:from-gray-900 dark:to-gray-800">
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl p-8 max-w-md w-full border-2 border-blue-200 dark:border-blue-800">
-          <h1 className="text-3xl font-bold mb-6 text-center text-gray-800 dark:text-gray-200">Ожидание игрока</h1>
-          <p className="text-gray-600 dark:text-gray-400 mb-6 text-center">
-            ID игры: <span className="font-mono font-bold text-blue-600 dark:text-blue-400">{gameId}</span>
+      <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-blue-50 via-sky-50 to-cyan-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
+        <div className="bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm rounded-2xl shadow-2xl p-8 max-w-md w-full border-4 border-blue-300 dark:border-blue-700">
+          <h1 className="text-4xl font-bold mb-6 text-center text-gray-800 dark:text-gray-200 drop-shadow-lg">
+            ⏳ Ожидание игрока
+          </h1>
+          <p className="text-gray-600 dark:text-gray-400 mb-6 text-center text-lg">
+            ID игры: <span className="font-mono font-bold text-blue-600 dark:text-blue-400 text-xl">{gameId}</span>
           </p>
           <div className="mb-6">
             <input
               type="text"
               value={shareLink}
               readOnly
-              className="w-full px-4 py-3 border-2 border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700 dark:text-gray-200 text-sm font-mono"
+              className="w-full px-4 py-3 border-3 border-gray-300 dark:border-gray-600 rounded-xl dark:bg-gray-700 dark:text-gray-200 text-sm font-mono shadow-lg"
             />
           </div>
           <button
@@ -75,13 +78,13 @@ export default function GameLobby({ gameId, onCreateGame, user }) {
                 alert('Ссылка скопирована!')
               }
             }}
-            className="w-full px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 mb-6 shadow-lg font-semibold transition-all"
+            className="w-full px-6 py-4 bg-blue-500 text-white rounded-xl hover:bg-blue-600 mb-6 shadow-xl font-bold text-lg transition-all hover:scale-105 active:scale-95"
           >
             📋 Копировать ссылку
           </button>
           <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-4 border-blue-500 mx-auto mb-4"></div>
-            <p className="text-gray-600 dark:text-gray-400 font-medium">Ожидание противника...</p>
+            <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-blue-500 mx-auto mb-4"></div>
+            <p className="text-gray-600 dark:text-gray-400 font-semibold text-lg">Ожидание противника...</p>
           </div>
         </div>
       </div>
@@ -90,34 +93,36 @@ export default function GameLobby({ gameId, onCreateGame, user }) {
 
   // Экран создания игры
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-blue-50 to-blue-100 dark:from-gray-900 dark:to-gray-800">
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl p-8 max-w-md w-full border-2 border-blue-200 dark:border-blue-800">
-        <h1 className="text-3xl font-bold mb-8 text-center text-gray-800 dark:text-gray-200">Морской бой</h1>
+    <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-blue-50 via-sky-50 to-cyan-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
+      <div className="bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm rounded-2xl shadow-2xl p-8 max-w-lg w-full border-4 border-blue-300 dark:border-blue-700">
+        <h1 className="text-5xl font-bold mb-8 text-center text-gray-800 dark:text-gray-200 drop-shadow-lg">
+          ⚓ Морской бой
+        </h1>
         
         <div className="mb-8">
-          <label className="block text-lg font-semibold mb-4 text-gray-800 dark:text-gray-200">Режим игры:</label>
+          <label className="block text-xl font-bold mb-4 text-gray-800 dark:text-gray-200">Режим игры:</label>
           <div className="space-y-3">
             {[
-              { mode: 'full', name: 'Полный (10×10)', desc: '4×1, 3×2, 2×3, 1×4' },
+              { mode: 'full', name: 'Полный (10×10)', desc: '1×4, 2×3, 3×2, 4×1' },
               { mode: 'classic', name: 'Обычный (8×8)', desc: '2×3, 2×2, 4×1' },
               { mode: 'fast', name: 'Быстрый (6×6)', desc: '1×3, 1×2, 2×1' }
             ].map(({ mode, name, desc }) => (
               <button
                 key={mode}
                 onClick={() => setSelectedMode(mode)}
-                className={`w-full px-6 py-4 rounded-xl border-2 transition-all ${
+                className={`w-full px-6 py-4 rounded-xl border-3 transition-all shadow-lg ${
                   selectedMode === mode
-                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 shadow-lg scale-105'
-                    : 'border-gray-300 dark:border-gray-600 hover:border-blue-300 dark:hover:border-blue-700'
+                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 shadow-xl scale-105 ring-4 ring-blue-200 dark:ring-blue-800'
+                    : 'border-gray-300 dark:border-gray-600 hover:border-blue-300 dark:hover:border-blue-700 hover:shadow-xl'
                 }`}
               >
                 <div className="flex items-center justify-between">
                   <div className="text-left">
-                    <div className="font-semibold text-gray-800 dark:text-gray-200">{name}</div>
+                    <div className="font-bold text-lg text-gray-800 dark:text-gray-200">{name}</div>
                     <div className="text-sm text-gray-600 dark:text-gray-400">{desc}</div>
                   </div>
                   {selectedMode === mode && (
-                    <span className="text-blue-500 text-2xl font-bold">✓</span>
+                    <span className="text-blue-500 text-3xl font-bold">✓</span>
                   )}
                 </div>
               </button>
@@ -125,10 +130,36 @@ export default function GameLobby({ gameId, onCreateGame, user }) {
           </div>
         </div>
 
+        <div className="mb-8">
+          <label className="block text-xl font-bold mb-4 text-gray-800 dark:text-gray-200">Таймер:</label>
+          <div className="flex gap-3">
+            <button
+              onClick={() => setSelectedTimer(false)}
+              className={`flex-1 px-6 py-4 rounded-xl border-3 transition-all shadow-lg font-bold text-lg ${
+                !selectedTimer
+                  ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 shadow-xl scale-105 ring-4 ring-blue-200 dark:ring-blue-800'
+                  : 'border-gray-300 dark:border-gray-600 hover:border-blue-300 dark:hover:border-blue-700'
+              }`}
+            >
+              {!selectedTimer && '✓ '}Без таймера
+            </button>
+            <button
+              onClick={() => setSelectedTimer(true)}
+              className={`flex-1 px-6 py-4 rounded-xl border-3 transition-all shadow-lg font-bold text-lg ${
+                selectedTimer
+                  ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 shadow-xl scale-105 ring-4 ring-blue-200 dark:ring-blue-800'
+                  : 'border-gray-300 dark:border-gray-600 hover:border-blue-300 dark:hover:border-blue-700'
+              }`}
+            >
+              {selectedTimer && '✓ '}С таймером
+            </button>
+          </div>
+        </div>
+
         <button
           onClick={handleCreate}
           disabled={creating}
-          className="w-full px-6 py-4 bg-blue-500 text-white rounded-xl hover:bg-blue-600 disabled:opacity-50 font-semibold text-lg shadow-lg transition-all"
+          className="w-full px-6 py-5 bg-blue-500 text-white rounded-xl hover:bg-blue-600 disabled:opacity-50 font-bold text-xl shadow-xl transition-all hover:scale-105 active:scale-95"
         >
           {creating ? '⏳ Создание...' : '🎮 Создать игру'}
         </button>

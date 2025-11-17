@@ -6,6 +6,7 @@ export default function GameSetup({ gameState, playerId, onStateUpdate, socket }
   const [placingShip, setPlacingShip] = useState(null)
   const [placing, setPlacing] = useState(false)
   const [autoPlaced, setAutoPlaced] = useState(false)
+  const [horizontal, setHorizontal] = useState(true)
 
   if (!gameState || !playerId || !gameState.players) {
     return <div className="flex items-center justify-center min-h-screen">Загрузка...</div>
@@ -51,7 +52,7 @@ export default function GameSetup({ gameState, playerId, onStateUpdate, socket }
         size: placingShip,
         row,
         col,
-        horizontal: true,
+        horizontal: horizontal,
         player_id: playerId
       })
       if (res.game_state) {
@@ -123,15 +124,15 @@ export default function GameSetup({ gameState, playerId, onStateUpdate, socket }
   const allShipsPlaced = shipsToPlace.length === 0
 
   return (
-    <div className="min-h-screen p-4 pb-20 bg-gradient-to-b from-blue-50 to-blue-100 dark:from-gray-900 dark:to-gray-800">
-      <div className="max-w-3xl mx-auto">
-        <h1 className="text-3xl font-bold mb-6 text-center text-gray-800 dark:text-gray-200">
-          Расстановка кораблей
+    <div className="min-h-screen p-4 pb-20 bg-gradient-to-b from-blue-50 via-sky-50 to-cyan-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
+      <div className="max-w-4xl mx-auto">
+        <h1 className="text-4xl font-bold mb-6 text-center text-gray-800 dark:text-gray-200 drop-shadow-lg">
+          ⚓ Расстановка кораблей
         </h1>
 
         {autoPlaced && (
-          <div className="bg-green-100 dark:bg-green-900/30 border-2 border-green-500 rounded-xl p-4 mb-4">
-            <p className="text-green-800 dark:text-green-200 font-semibold text-center mb-2">
+          <div className="bg-green-100 dark:bg-green-900/40 border-3 border-green-500 rounded-xl p-4 mb-6 shadow-lg">
+            <p className="text-green-800 dark:text-green-200 font-bold text-center mb-2 text-lg">
               ✅ Корабли расставлены автоматически!
             </p>
             <p className="text-sm text-green-700 dark:text-green-300 text-center">
@@ -140,17 +141,17 @@ export default function GameSetup({ gameState, playerId, onStateUpdate, socket }
           </div>
         )}
 
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-4 mb-4">
-          <h2 className="text-lg font-bold mb-3 text-gray-800 dark:text-gray-200">Корабли для размещения:</h2>
-          <div className="flex flex-wrap gap-2 mb-3">
+        <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm rounded-2xl shadow-2xl p-6 mb-6 border-2 border-blue-200 dark:border-blue-700">
+          <h2 className="text-xl font-bold mb-4 text-gray-800 dark:text-gray-200">Корабли для размещения:</h2>
+          <div className="flex flex-wrap gap-3 mb-4">
             {shipsToPlace.map((ship, idx) => (
               <button
                 key={idx}
                 onClick={() => setPlacingShip(ship.size)}
                 disabled={placing}
-                className={`px-4 py-2 rounded-lg font-semibold transition-all ${
+                className={`px-5 py-3 rounded-xl font-bold text-lg transition-all shadow-lg ${
                   placingShip === ship.size
-                    ? 'bg-blue-500 text-white shadow-lg scale-105'
+                    ? 'bg-blue-600 text-white scale-110 shadow-xl ring-4 ring-blue-300'
                     : 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600'
                 } disabled:opacity-50`}
               >
@@ -159,18 +160,46 @@ export default function GameSetup({ gameState, playerId, onStateUpdate, socket }
             ))}
           </div>
 
+          {placingShip && (
+            <div className="mt-4 pt-4 border-t-2 border-gray-200 dark:border-gray-700">
+              <div className="flex items-center gap-4">
+                <span className="text-gray-700 dark:text-gray-300 font-semibold">Ориентация:</span>
+                <button
+                  onClick={() => setHorizontal(true)}
+                  className={`px-4 py-2 rounded-lg font-semibold transition-all ${
+                    horizontal
+                      ? 'bg-blue-500 text-white shadow-lg'
+                      : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+                  }`}
+                >
+                  ➡ Горизонтально
+                </button>
+                <button
+                  onClick={() => setHorizontal(false)}
+                  className={`px-4 py-2 rounded-lg font-semibold transition-all ${
+                    !horizontal
+                      ? 'bg-blue-500 text-white shadow-lg'
+                      : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+                  }`}
+                >
+                  ⬇ Вертикально
+                </button>
+              </div>
+            </div>
+          )}
+
           {myPlayer.ships && myPlayer.ships.length > 0 && (
-            <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-              <h3 className="text-sm font-semibold mb-2 text-gray-700 dark:text-gray-300">Размещенные корабли:</h3>
+            <div className="mt-4 pt-4 border-t-2 border-gray-200 dark:border-gray-700">
+              <h3 className="text-sm font-bold mb-3 text-gray-700 dark:text-gray-300">Размещенные корабли:</h3>
               <div className="flex flex-wrap gap-2">
                 {myPlayer.ships.map((ship, idx) => (
                   <button
                     key={idx}
                     onClick={() => handleRemoveShip(idx)}
                     disabled={placing}
-                    className="px-3 py-1 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-lg text-sm hover:bg-red-200 dark:hover:bg-red-900/50 disabled:opacity-50 transition-all"
+                    className="px-4 py-2 bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 rounded-lg text-sm font-semibold hover:bg-red-200 dark:hover:bg-red-900/60 disabled:opacity-50 transition-all shadow-md"
                   >
-                    ✕ {ship.size}×1
+                    ✕ Удалить {ship.size}×1
                   </button>
                 ))}
               </div>
@@ -178,8 +207,8 @@ export default function GameSetup({ gameState, playerId, onStateUpdate, socket }
           )}
         </div>
 
-        <div className="flex justify-center mb-4">
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-4">
+        <div className="flex justify-center mb-6">
+          <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm rounded-2xl shadow-2xl p-6 border-2 border-blue-200 dark:border-blue-700">
             <Board
               board={myPlayer.board}
               size={gameState.config?.size || 10}
@@ -190,11 +219,11 @@ export default function GameSetup({ gameState, playerId, onStateUpdate, socket }
           </div>
         </div>
 
-        <div className="flex flex-col sm:flex-row gap-3 justify-center">
+        <div className="flex flex-col sm:flex-row gap-4 justify-center">
           <button
             onClick={handleAutoPlace}
             disabled={placing}
-            className="px-6 py-3 bg-green-500 text-white rounded-xl hover:bg-green-600 disabled:opacity-50 shadow-lg font-semibold transition-all"
+            className="px-8 py-4 bg-green-500 text-white rounded-xl hover:bg-green-600 disabled:opacity-50 shadow-xl font-bold text-lg transition-all hover:scale-105 active:scale-95"
           >
             {placing ? '⏳ Расстановка...' : '🎲 Авто-расстановка'}
           </button>
@@ -203,7 +232,7 @@ export default function GameSetup({ gameState, playerId, onStateUpdate, socket }
             <button
               onClick={handleReady}
               disabled={placing || myPlayer.ready}
-              className="px-6 py-3 bg-blue-500 text-white rounded-xl hover:bg-blue-600 disabled:opacity-50 shadow-lg font-semibold transition-all"
+              className="px-8 py-4 bg-blue-500 text-white rounded-xl hover:bg-blue-600 disabled:opacity-50 shadow-xl font-bold text-lg transition-all hover:scale-105 active:scale-95"
             >
               {myPlayer.ready ? '✅ Готов' : '✅ Готово'}
             </button>
