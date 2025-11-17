@@ -24,20 +24,12 @@ const getWSUrl = async () => {
     return cachedWSUrl
   }
   
-  // В продакшене сразу используем продакшн URL (не проверяем localhost)
-  if (import.meta.env.PROD) {
-    const prodUrl = import.meta.env.VITE_API_URL || 
-                   import.meta.env.VITE_BACKEND_URL || 
-                   'https://seabatlle-tg.onrender.com'
-    cachedWSUrl = httpToWs(prodUrl)
-    return cachedWSUrl
-  }
-  
-  // В разработке пробуем localhost, затем продакшн как fallback
   const localhostUrl = 'http://localhost:5000'
-  const prodUrl = import.meta.env.VITE_BACKEND_URL || 'https://seabatlle-tg.onrender.com'
+  const prodUrl = import.meta.env.VITE_API_URL || 
+                 import.meta.env.VITE_BACKEND_URL || 
+                 'https://seabatlle-tg.onrender.com'
   
-  // Пробуем localhost
+  // Всегда пробуем localhost первым (даже в продакшене)
   try {
     const response = await fetch(`${localhostUrl}/health`, {
       method: 'GET',
@@ -48,7 +40,7 @@ const getWSUrl = async () => {
       return cachedWSUrl
     }
   } catch {
-    // localhost недоступен, используем продакшн
+    // localhost недоступен, пробуем продакшн
   }
   
   // Если localhost недоступен - используем продакшн

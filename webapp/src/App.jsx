@@ -134,7 +134,7 @@ function App() {
   }
 
   if (!gameState) {
-    return <GameLobby gameId={gameId} onJoin={loadGameState} />
+    return <GameLobby gameId={gameId} onJoin={loadGameState} onCreateGame={createNewGame} user={user} />
   }
 
   // Если игра в процессе расстановки
