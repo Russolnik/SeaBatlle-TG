@@ -1113,6 +1113,7 @@ async def start_battle(game: GameState):
 async def cmd_play(message: Message):
     """Команда /play - создать игру"""
     # Проверяем, не участвует ли пользователь уже в активной игре
+    # ВАЖНО: разрешаем несколько игр в одной группе, но один пользователь может играть только в одной игре
     existing = get_game_by_user(message.from_user.id)
     if existing:
         game_id, game, player_id = existing
@@ -1186,6 +1187,7 @@ async def cmd_play(message: Message):
     
     logger.info(f"Создана кнопка Mini App для игры {game_id}, URL: {webapp_url}?gameId={game_id}")
     
+    # Отправляем сообщение создателю
     msg = await message.answer(text, reply_markup=keyboard)
     game.setup_message_id = msg.message_id
     
@@ -1194,9 +1196,35 @@ async def cmd_play(message: Message):
         await message.delete()
     except:
         pass
-    # Если игра в группе, сохраняем ID сообщения
+    
+    # Если игра в группе, отправляем приглашение в группу
     if game.group_id:
-        game.group_messages.append(msg.message_id)
+        bot_info = await get_bot_info()
+        group_text = f"🎮 Новая игра создана!\n\n"
+        group_text += f"Создатель: @{p1.username}\n"
+        group_text += f"ID игры: {game_id}\n\n"
+        group_text += f"Присоединяйтесь к игре!"
+        
+        # Клавиатура с кнопкой присоединения
+        from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+        group_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🎮 Присоединиться к игре",
+                    url=f"https://t.me/{bot_info['username']}?start=join_{game_id}"
+                )
+            ]
+        ])
+        
+        try:
+            group_msg = await bot.send_message(
+                chat_id=game.group_id,
+                text=group_text,
+                reply_markup=group_keyboard
+            )
+            game.group_messages.append(group_msg.message_id)
+        except Exception as e:
+            logger.error(f"Ошибка отправки сообщения в группу: {e}")
 
 
 @dp.message(Command("stop"))
@@ -1204,21 +1232,15 @@ async def cmd_stop(message: Message):
     """Команда /stop - отменить текущую игру"""
     user_id = message.from_user.id
     
-    # Ищем игру по пользователю или по группе
+    # Ищем игру по пользователю (только его игру, не все игры в группе)
     game_to_stop = None
-    if message.chat.type == "private":
-        # В личных сообщениях ищем игру по user_id
-        existing = get_game_by_user(user_id)
-        if existing:
-            game_id, game, player_id = existing
+    existing = get_game_by_user(user_id)
+    if existing:
+        game_id, game, player_id = existing
+        # Проверяем, что это игра создателя (только создатель может отменить)
+        p1 = game.get_player('p1')
+        if p1 and p1.user_id == user_id:
             game_to_stop = (game_id, game)
-    else:
-        # В группах ищем игру по group_id
-        group_id = message.chat.id
-        for game_id, game in games.items():
-            if game.group_id == group_id:
-                game_to_stop = (game_id, game)
-                break
     
     if not game_to_stop:
         if message.chat.type == "private":
@@ -1700,99 +1722,56 @@ async def cmd_start(message: Message, command: CommandStart):
                         logger.warning(f"Не удалось получить информацию о p2 ({p2.user_id}): {e}")
                         p2_name = p2.username or message.from_user.first_name or p2_name
                 
-                # Формируем ссылки на игроков (используем HTML для более надежной работы)
-                if p1 and p1.username:
-                    p1_link = f'<a href="tg://user?id={p1.user_id}">@{p1.username}</a>'
-                elif p1:
-                    p1_link = f'<a href="tg://user?id={p1.user_id}">{p1_name}</a>'
-                else:
-                    p1_link = "Игрок 1"
+                mode_names = {
+                    'full': 'Полный (10×10)',
+                    'classic': 'Обычный (8×8)',
+                    'fast': 'Быстрый (6×6)'
+                }
+                group_notification = f"🎮 Игра началась!\n\n"
+                group_notification += f"Игроки: @{p1.username if p1 else 'Игрок 1'} vs @{p2.username if p2 else 'Игрок 2'}\n"
+                group_notification += f"Режим: {mode_names.get(game.mode, game.mode)}\n"
+                group_notification += f"Таймер: {'включен' if game.is_timed else 'выключен'}\n\n"
+                group_notification += f"Играйте в Mini App!"
                 
-                if p2 and p2.username:
-                    p2_link = f'<a href="tg://user?id={p2.user_id}">@{p2.username}</a>'
-                elif p2:
-                    p2_link = f'<a href="tg://user?id={p2.user_id}">{p2_name}</a>'
-                else:
-                    p2_link = "Игрок 2"
-                
-                group_notification = "🎮 Игра началась!\n\n"
-                group_notification += "👥 Игроки:\n"
-                group_notification += f"1️⃣ {p1_link}\n"
-                group_notification += f"2️⃣ {p2_link}\n\n"
-                group_notification += f"Режим: {'Обычный (8×8)' if game.mode == 'classic' else 'Быстрый (6×6)'}\n"
-                group_notification += f"Таймер: {'включен' if game.is_timed else 'выключен'}"
-                
-                # Получаем информацию о боте для кнопки
+                # Получаем URL для Mini App
+                webapp_url = os.getenv("WEBAPP_URL", "https://seabatl.netlify.app")
                 bot_info = await get_bot_info()
-                bot_username = bot_info.get('username', '')
                 
-                # Создаем клавиатуру с кнопкой "Перейти в бота"
-                from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-                notification_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                from aiogram.types import InlineKeyboardButton, WebAppInfo, InlineKeyboardMarkup
+                group_keyboard = InlineKeyboardMarkup(inline_keyboard=[
                     [
                         InlineKeyboardButton(
-                            text="🤖 Перейти в бота",
-                            url=f"https://t.me/{bot_username}" if bot_username else None
+                            text="🎮 Открыть приложение",
+                            web_app=WebAppInfo(url=f"{webapp_url}?gameId={game_id}&bot={bot_info['username']}")
                         )
                     ]
                 ])
                 
-                # Проверяем, что игра все еще существует перед отправкой в группу
-                if game_id not in games:
-                    logger.warning(f"Игра {game_id} была удалена перед отправкой уведомления в группу")
-                    return
+                group_msg = await bot.send_message(
+                    chat_id=game.group_id,
+                    text=group_notification,
+                    reply_markup=group_keyboard
+                )
+                game.group_messages.append(group_msg.message_id)
                 
-                # Дополнительная проверка group_id
-                if not game.group_id:
-                    logger.warning(f"game.group_id is None для игры {game_id}, пропускаем отправку в группу")
-                    return
-                
-                # Пытаемся отправить с HTML форматированием
-                try:
-                    msg = await bot.send_message(
-                        chat_id=game.group_id,
-                        text=group_notification,
-                        parse_mode="HTML",
-                        reply_markup=notification_keyboard if bot_username else None
-                    )
-                    # Сохраняем ID сообщения в группе
-                    if game_id in games:  # Проверяем еще раз перед сохранением
-                        game.group_messages.append(msg.message_id)
-                    logger.info(f"Уведомление о начале игры отправлено в группу {game.group_id}")
-                except Exception as html_error:
-                    # Если HTML не работает, пробуем без форматирования
-                    logger.warning(f"Ошибка при отправке с HTML форматированием: {html_error}, пробуем без форматирования")
+                # Обновляем предыдущее сообщение с приглашением
+                if len(game.group_messages) > 1:
                     try:
-                        # Формируем текст без ссылок
-                        simple_notification = "🎮 Игра началась!\n\n"
-                        simple_notification += "👥 Игроки:\n"
-                        simple_notification += f"1️⃣ {p1_name}\n"
-                        simple_notification += f"2️⃣ {p2_name}\n\n"
-                        simple_notification += f"Режим: {'Обычный (8×8)' if game.mode == 'classic' else 'Быстрый (6×6)'}\n"
-                        simple_notification += f"Таймер: {'включен' if game.is_timed else 'выключен'}"
+                        updated_text = f"🎮 Игра создана!\n\n"
+                        updated_text += f"Создатель: @{p1.username if p1 else 'Игрок 1'}\n"
+                        updated_text += f"ID игры: {game_id}\n\n"
+                        updated_text += f"✅ Игроки: @{p1.username if p1 else 'Игрок 1'} и @{p2.username if p2 else 'Игрок 2'}\n"
+                        updated_text += f"Игра началась!"
                         
-                        msg = await bot.send_message(
+                        await bot.edit_message_text(
                             chat_id=game.group_id,
-                            text=simple_notification,
-                            reply_markup=notification_keyboard if bot_username else None
+                            message_id=game.group_messages[0],
+                            text=updated_text
                         )
-                        if game_id in games:
-                            game.group_messages.append(msg.message_id)
-                        logger.info(f"Уведомление о начале игры отправлено в группу {game.group_id} (без форматирования)")
-                    except Exception as simple_error:
-                        logger.error(f"Не удалось отправить уведомление в группу {game.group_id}: {simple_error}", exc_info=True)
-                        # Пытаемся отправить хотя бы простое сообщение
-                        try:
-                            await bot.send_message(
-                                chat_id=game.group_id,
-                                text=f"🎮 Игра началась! Режим: {'Обычный (8×8)' if game.mode == 'classic' else 'Быстрый (6×6)'}"
-                            )
-                        except:
-                            pass
+                    except Exception as e:
+                        logger.error(f"Ошибка обновления сообщения в группе: {e}")
             except Exception as e:
-                # Если не удалось отправить в группу (например, бот не может отправлять сообщения),
-                # логируем ошибку с полной информацией
-                logger.error(f"Критическая ошибка при отправке уведомления в группу {game.group_id}: {e}", exc_info=True)
+                logger.error(f"Ошибка отправки уведомления в группу: {e}")
         
         # Удаляем сообщение команды после присоединения к игре
         try:
@@ -2598,60 +2577,34 @@ async def end_game(game: GameState):
     # Отправляем результаты в группу, если игра была создана там
     if game.group_id:
         try:
-            # Формируем ссылки на игроков
-            if winner.username:
-                winner_link = f"@{winner.username}"
-            else:
-                try:
-                    winner_user = await bot.get_chat(winner.user_id)
-                    winner_name = winner_user.first_name or winner_user.username or f"Игрок {winner.user_id}"
-                    winner_link = f"[{winner_name}](tg://user?id={winner.user_id})"
-                except:
-                    winner_link = f"@{winner.username}"
-            
-            if loser.username:
-                loser_link = f"@{loser.username}"
-            else:
-                try:
-                    loser_user = await bot.get_chat(loser.user_id)
-                    loser_name = loser_user.first_name or loser_user.username or f"Игрок {loser.user_id}"
-                    loser_link = f"[{loser_name}](tg://user?id={loser.user_id})"
-                except:
-                    loser_link = f"@{loser.username}"
+            mode_names = {
+                'full': 'Полный (10×10)',
+                'classic': 'Обычный (8×8)',
+                'fast': 'Быстрый (6×6)'
+            }
             
             winner_ships = get_remaining_ships(winner)
             loser_ships = get_remaining_ships(loser)
             
-            group_result = "🏆 Игра завершена!\n\n"
-            group_result += f"👑 Победитель: {winner_link}\n"
-            group_result += f"😔 Проигравший: {loser_link}\n\n"
+            if game.surrendered:
+                group_result = f"🚩 Игра завершена!\n\n"
+                group_result += f"🏆 Победитель: @{winner.username}\n"
+                group_result += f"@{loser.username} сдался\n\n"
+            else:
+                group_result = f"🎉 Игра завершена!\n\n"
+                group_result += f"🏆 Победитель: @{winner.username}\n"
+                group_result += f"😔 Проигравший: @{loser.username}\n\n"
+            
             group_result += f"📊 Результаты:\n"
-            group_result += f"✅ {winner_link}: {winner_ships} кораблей осталось\n"
-            group_result += f"❌ {loser_link}: {loser_ships} кораблей осталось\n\n"
-            group_result += f"Режим: {'Обычный (8×8)' if game.mode == 'classic' else 'Быстрый (6×6)'}"
+            group_result += f"✅ @{winner.username}: {winner_ships} кораблей осталось\n"
+            group_result += f"❌ @{loser.username}: {loser_ships} кораблей осталось\n\n"
+            group_result += f"Режим: {mode_names.get(game.mode, game.mode)}\n"
+            group_result += f"ID игры: {game.id}"
             
-            # Получаем информацию о боте для кнопки
-            bot_info = await get_bot_info()
-            bot_username = bot_info.get('username', '')
-            
-            # Создаем клавиатуру с кнопкой "Перейти в бота"
-            from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-            result_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text="🤖 Перейти в бота",
-                        url=f"https://t.me/{bot_username}" if bot_username else None
-                    )
-                ]
-            ])
-            
-            result_msg = await bot.send_message(
+            await bot.send_message(
                 chat_id=game.group_id,
-                text=group_result,
-                parse_mode="Markdown",
-                reply_markup=result_keyboard if bot_username else None
+                text=group_result
             )
-            # НЕ сохраняем ID сообщения с результатами - оно должно остаться в группе
         except Exception as e:
             logger.warning(f"Не удалось отправить результаты в группу: {e}")
             pass
