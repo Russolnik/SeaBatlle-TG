@@ -492,6 +492,43 @@ def api_auto_place(game_id):
         logger.error(f"Ошибка авто-расстановки: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/bot/info', methods=['GET'])
+def api_bot_info():
+    """Получить информацию о боте"""
+    try:
+        # Используем кэш если есть
+        global _bot_info_cache
+        if _bot_info_cache is None:
+            # Если кэша нет, создаем новый event loop для синхронного вызова
+            import asyncio
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            
+            if loop.is_running():
+                # Если loop уже запущен, используем run_coroutine_threadsafe
+                import threading
+                future = asyncio.run_coroutine_threadsafe(get_bot_info(), loop)
+                bot_info = future.result(timeout=5)
+            else:
+                bot_info = loop.run_until_complete(get_bot_info())
+        else:
+            bot_info = _bot_info_cache
+        
+        return jsonify({
+            'username': bot_info.get('username', 'bot'),
+            'first_name': bot_info.get('first_name', 'Bot')
+        }), 200
+    except Exception as e:
+        logger.error(f"Ошибка получения информации о боте: {e}", exc_info=True)
+        # Возвращаем дефолтное значение при ошибке
+        return jsonify({
+            'username': 'bot',
+            'first_name': 'Bot'
+        }), 200
+
 @app.route('/api/user/active-game', methods=['GET'])
 def api_get_active_game():
     """Получить активную игру пользователя"""
