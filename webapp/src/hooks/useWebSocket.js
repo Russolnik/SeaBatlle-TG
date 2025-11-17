@@ -24,26 +24,29 @@ const getWSUrl = async () => {
     return cachedWSUrl
   }
   
-  const localhostUrl = 'http://localhost:5000'
   const prodUrl = import.meta.env.VITE_API_URL || 
                  import.meta.env.VITE_BACKEND_URL || 
                  'https://seabatlle-tg.onrender.com'
   
-  // Всегда пробуем localhost первым (даже в продакшене)
-  try {
-    const response = await fetch(`${localhostUrl}/health`, {
-      method: 'GET',
-      signal: AbortSignal.timeout(2000),
-    })
-    if (response.ok) {
-      cachedWSUrl = httpToWs(localhostUrl)
-      return cachedWSUrl
+  // В продакшене (Netlify) не пробуем localhost - это невозможно
+  // Пробуем localhost только в разработке (localhost или 127.0.0.1)
+  if (!import.meta.env.PROD && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+    const localhostUrl = 'http://localhost:5000'
+    try {
+      const response = await fetch(`${localhostUrl}/health`, {
+        method: 'GET',
+        signal: AbortSignal.timeout(2000),
+      })
+      if (response.ok) {
+        cachedWSUrl = httpToWs(localhostUrl)
+        return cachedWSUrl
+      }
+    } catch {
+      // localhost недоступен, пробуем продакшн
     }
-  } catch {
-    // localhost недоступен, пробуем продакшн
   }
   
-  // Если localhost недоступен - используем продакшн
+  // Если localhost недоступен или мы в продакшене - используем продакшн
   cachedWSUrl = httpToWs(prodUrl)
   return cachedWSUrl
 }

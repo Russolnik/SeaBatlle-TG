@@ -10,15 +10,25 @@ function App() {
   const [gameState, setGameState] = useState(null)
   const [gameId, setGameId] = useState(null)
   const [playerId, setPlayerId] = useState(null)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+  const [initialized, setInitialized] = useState(false)
   
   const { user, authToken, loading: authLoading } = useTelegramAuth()
   const { socket, connected } = useWebSocket(gameId, authToken)
 
-  // Получаем gameId из URL параметров
+  // Инициализация: сначала показываем экран, потом авторизация, потом загрузка игры
   useEffect(() => {
-    if (authLoading) return // Ждем авторизации
+    // Сначала показываем экран (не ждем авторизации)
+    if (!initialized) {
+      setInitialized(true)
+      setLoading(false) // Не показываем загрузку сразу
+    }
+  }, [])
+
+  // После авторизации загружаем игру
+  useEffect(() => {
+    if (!initialized || authLoading) return // Ждем инициализации и авторизации
     
     const params = new URLSearchParams(window.location.search)
     const id = params.get('gameId')
@@ -27,11 +37,9 @@ function App() {
     if (id) {
       setGameId(id)
       loadGameState(id)
-    } else {
-      // Создаем новую игру
-      createNewGame(mode)
     }
-  }, [authLoading])
+    // Если gameId нет - показываем экран создания игры (через GameLobby)
+  }, [initialized, authLoading])
 
   // Слушаем обновления через WebSocket
   useEffect(() => {
@@ -106,7 +114,8 @@ function App() {
     }
   }
 
-  if (loading || authLoading) {
+  // Показываем загрузку только при авторизации
+  if (authLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-center">
