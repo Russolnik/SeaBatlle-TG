@@ -13,7 +13,6 @@ const httpToWs = (url) => {
 }
 
 // Функция для получения WebSocket URL
-// Сначала пробуем localhost:5000, затем продакшн
 const getWSUrl = async () => {
   // Если указан явно - используем его
   if (import.meta.env.VITE_WS_URL) {
@@ -25,38 +24,35 @@ const getWSUrl = async () => {
     return cachedWSUrl
   }
   
-  // Список URL для проверки (сначала localhost)
-  const urls = ['http://localhost:5000']
-  
+  // В продакшене сразу используем продакшн URL (не проверяем localhost)
   if (import.meta.env.PROD) {
-    urls.push(import.meta.env.VITE_BACKEND_URL || 'https://seabatlle-tg.onrender.com')
+    const prodUrl = import.meta.env.VITE_API_URL || 
+                   import.meta.env.VITE_BACKEND_URL || 
+                   'https://seabatlle-tg.onrender.com'
+    cachedWSUrl = httpToWs(prodUrl)
+    return cachedWSUrl
   }
   
-  // Если указан VITE_API_URL - добавляем его в начало
-  if (import.meta.env.VITE_API_URL) {
-    urls.unshift(import.meta.env.VITE_API_URL)
-  }
+  // В разработке пробуем localhost, затем продакшн как fallback
+  const localhostUrl = 'http://localhost:5000'
+  const prodUrl = import.meta.env.VITE_BACKEND_URL || 'https://seabatlle-tg.onrender.com'
   
-  // Пробуем каждый URL (проверяем через HTTP health check)
-  for (const url of urls) {
-    try {
-      const httpUrl = url.replace('ws://', 'http://').replace('wss://', 'https://')
-      const response = await fetch(`${httpUrl}/health`, {
-        method: 'GET',
-        signal: AbortSignal.timeout(2000),
-      })
-      if (response.ok) {
-        cachedWSUrl = httpToWs(url)
-        return cachedWSUrl
-      }
-    } catch {
-      // Продолжаем проверку следующего URL
-      continue
+  // Пробуем localhost
+  try {
+    const response = await fetch(`${localhostUrl}/health`, {
+      method: 'GET',
+      signal: AbortSignal.timeout(2000),
+    })
+    if (response.ok) {
+      cachedWSUrl = httpToWs(localhostUrl)
+      return cachedWSUrl
     }
+  } catch {
+    // localhost недоступен, используем продакшн
   }
   
-  // Если ничего не работает - возвращаем последний URL
-  cachedWSUrl = httpToWs(urls[urls.length - 1])
+  // Если localhost недоступен - используем продакшн
+  cachedWSUrl = httpToWs(prodUrl)
   return cachedWSUrl
 }
 

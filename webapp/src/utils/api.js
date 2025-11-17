@@ -1,39 +1,20 @@
-// Функция для определения базового URL API
-// Сначала пробуем localhost:5000, затем продакшн сервер
+// Кэш для хранения рабочего URL
+let cachedApiUrl = null
+
+// Функция для получения базового API URL
 const getApiBaseUrl = () => {
   // Если указан явно в переменных окружения - используем его
   if (import.meta.env.VITE_API_URL) {
     return import.meta.env.VITE_API_URL
   }
   
-  // В продакшене пробуем сначала localhost, затем продакшн
-  const urls = ['http://localhost:5000']
-  
+  // В продакшене используем только продакшн URL
   if (import.meta.env.PROD) {
-    urls.push(import.meta.env.VITE_BACKEND_URL || 'https://seabatlle-tg.onrender.com')
-  } else {
-    // В разработке используем только localhost
-    return 'http://localhost:5000'
+    return import.meta.env.VITE_BACKEND_URL || 'https://seabatlle-tg.onrender.com'
   }
   
-  // Возвращаем первый URL (localhost), fallback будет обработан в функциях запросов
-  return urls[0]
-}
-
-// Кэш для хранения рабочего URL
-let cachedApiUrl = null
-
-// Функция для проверки доступности URL
-const checkUrlAvailability = async (url) => {
-  try {
-    const response = await fetch(`${url}/health`, {
-      method: 'GET',
-      signal: AbortSignal.timeout(2000), // Таймаут 2 секунды
-    })
-    return response.ok
-  } catch {
-    return false
-  }
+  // В разработке используем localhost
+  return 'http://localhost:5000'
 }
 
 // Функция для получения рабочего API URL
@@ -43,34 +24,36 @@ const getWorkingApiUrl = async () => {
     return cachedApiUrl
   }
   
-  // Список URL для проверки
-  const urls = []
-  
-  // Всегда пробуем localhost:5000 первым
-  urls.push('http://localhost:5000')
-  
-  // Если в продакшене - добавляем продакшн URL
+  // В продакшене сразу используем продакшн URL (не проверяем localhost)
   if (import.meta.env.PROD) {
-    urls.push(import.meta.env.VITE_BACKEND_URL || 'https://seabatlle-tg.onrender.com')
+    const prodUrl = import.meta.env.VITE_API_URL || 
+                   import.meta.env.VITE_BACKEND_URL || 
+                   'https://seabatlle-tg.onrender.com'
+    cachedApiUrl = prodUrl
+    return prodUrl
   }
   
-  // Если указан явно VITE_API_URL - добавляем его в начало
-  if (import.meta.env.VITE_API_URL) {
-    urls.unshift(import.meta.env.VITE_API_URL)
-  }
+  // В разработке пробуем localhost, затем продакшн как fallback
+  const localhostUrl = 'http://localhost:5000'
+  const prodUrl = import.meta.env.VITE_BACKEND_URL || 'https://seabatlle-tg.onrender.com'
   
-  // Пробуем каждый URL
-  for (const url of urls) {
-    const isAvailable = await checkUrlAvailability(url)
-    if (isAvailable) {
-      cachedApiUrl = url
-      return url
+  // Пробуем localhost
+  try {
+    const response = await fetch(`${localhostUrl}/health`, {
+      method: 'GET',
+      signal: AbortSignal.timeout(2000),
+    })
+    if (response.ok) {
+      cachedApiUrl = localhostUrl
+      return localhostUrl
     }
+  } catch {
+    // localhost недоступен, используем продакшн
   }
   
-  // Если ничего не работает - возвращаем последний URL (обычно продакшн)
-  cachedApiUrl = urls[urls.length - 1]
-  return cachedApiUrl
+  // Если localhost недоступен - используем продакшн
+  cachedApiUrl = prodUrl
+  return prodUrl
 }
 
 // Базовый URL (будет переопределен при первом запросе)

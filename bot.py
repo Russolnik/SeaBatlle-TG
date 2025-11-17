@@ -94,36 +94,34 @@ def is_origin_allowed(origin):
 @app.after_request
 def after_request(response):
     """Добавляем CORS заголовки к каждому ответу"""
-    # Проверяем, является ли запрос к API
-    if request.path.startswith('/api/'):
-        origin = request.headers.get('Origin', '')
-        
-        # Удаляем все существующие CORS заголовки, чтобы избежать дублирования
-        cors_headers_to_remove = [
-            'Access-Control-Allow-Origin',
-            'Access-Control-Allow-Methods',
-            'Access-Control-Allow-Headers',
-            'Access-Control-Allow-Credentials',
-            'Access-Control-Max-Age'
-        ]
-        for header in cors_headers_to_remove:
-            if header in response.headers:
-                del response.headers[header]
-        
-        # Проверяем origin
-        if is_origin_allowed(origin) or not origin:
-            # Устанавливаем заголовки только один раз
-            response.headers['Access-Control-Allow-Origin'] = origin if origin else '*'
-            response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH'
-            response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With'
-            response.headers['Access-Control-Allow-Credentials'] = 'true'
-            response.headers['Access-Control-Max-Age'] = '3600'
-        else:
-            # Если origin не разрешен, все равно добавляем заголовки для отладки
-            response.headers['Access-Control-Allow-Origin'] = origin
-            response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH'
-            response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With'
-            response.headers['Access-Control-Allow-Credentials'] = 'true'
+    origin = request.headers.get('Origin', '')
+    
+    # Удаляем все существующие CORS заголовки, чтобы избежать дублирования
+    cors_headers_to_remove = [
+        'Access-Control-Allow-Origin',
+        'Access-Control-Allow-Methods',
+        'Access-Control-Allow-Headers',
+        'Access-Control-Allow-Credentials',
+        'Access-Control-Max-Age'
+    ]
+    for header in cors_headers_to_remove:
+        if header in response.headers:
+            del response.headers[header]
+    
+    # Добавляем CORS заголовки для всех endpoints (включая /health)
+    if is_origin_allowed(origin) or not origin:
+        # Устанавливаем заголовки только один раз
+        response.headers['Access-Control-Allow-Origin'] = origin if origin else '*'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With'
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
+        response.headers['Access-Control-Max-Age'] = '3600'
+    else:
+        # Если origin не разрешен, все равно добавляем заголовки для отладки
+        response.headers['Access-Control-Allow-Origin'] = origin
+        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With'
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
     
     return response
 
