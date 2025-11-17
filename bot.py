@@ -42,8 +42,43 @@ logger = logging.getLogger(__name__)
 
 # Flask приложение для веб-сервера (чтобы Render видел его как активный сервис)
 app = Flask(__name__)
-CORS(app, resources={r"/api/*": {"origins": "*"}})
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+
+# Настройка CORS - разрешаем запросы с фронтенда
+# Получаем URL бэкенда из переменных окружения
+BACKEND_URL = os.getenv("BACKEND_URL", "https://seabatlle-tg.onrender.com")
+
+allowed_origins = [
+    BACKEND_URL,  # Разрешаем запросы с самого бэкенда
+    "http://localhost:3000",
+    "http://localhost:5173",  # Vite dev server
+    "https://*.netlify.app",  # Netlify деплои
+    "https://*.vercel.app",   # Vercel деплои (на будущее)
+]
+
+# Получаем URL веб-приложения из переменных окружения
+webapp_url = os.getenv("WEBAPP_URL", "")
+if webapp_url:
+    allowed_origins.append(webapp_url)
+    # Также добавляем без протокола для гибкости
+    if webapp_url.startswith("https://"):
+        allowed_origins.append(webapp_url.replace("https://", "http://"))
+
+CORS(app, resources={
+    r"/api/*": {
+        "origins": allowed_origins,
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"],
+        "credentials": True
+    }
+})
+
+socketio = SocketIO(
+    app,
+    cors_allowed_origins=allowed_origins,
+    async_mode='threading',
+    logger=True,
+    engineio_logger=True
+)
 
 @app.route('/')
 def index():

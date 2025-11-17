@@ -1,4 +1,5 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? 'https://your-backend-domain.com' : 'http://localhost:5000')
+// URL бэкенда из переменных окружения, если не указан - используем дефолтный для разработки
+const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? import.meta.env.VITE_BACKEND_URL || 'https://seabatlle-tg.onrender.com' : 'http://localhost:5000')
 
 export const api = {
   async get(url) {

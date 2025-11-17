@@ -8,7 +8,15 @@ const getWSUrl = () => {
   }
   if (import.meta.env.PROD) {
     // В продакшене используем wss:// для безопасного WebSocket
-    const apiUrl = import.meta.env.VITE_API_URL || 'https://your-backend-domain.com'
+    // Приоритет: VITE_WS_URL > VITE_API_URL > VITE_BACKEND_URL > дефолтный
+    const apiUrl = import.meta.env.VITE_WS_URL || 
+                   import.meta.env.VITE_API_URL || 
+                   import.meta.env.VITE_BACKEND_URL || 
+                   'https://seabatlle-tg.onrender.com'
+    // Если URL уже начинается с ws:// или wss://, возвращаем как есть
+    if (apiUrl.startsWith('ws://') || apiUrl.startsWith('wss://')) {
+      return apiUrl
+    }
     return apiUrl.replace('http://', 'ws://').replace('https://', 'wss://')
   }
   return 'http://localhost:5000'

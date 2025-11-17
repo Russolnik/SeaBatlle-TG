@@ -44,8 +44,9 @@ netlify deploy --prod
    - **Publish directory**: `webapp/dist`
 
 6. Добавьте переменные окружения в Netlify:
-   - `VITE_API_URL` = `https://your-backend-domain.com`
-   - `VITE_WS_URL` = `wss://your-backend-domain.com` (или `https://your-backend-domain.com` если используется тот же домен)
+   - `VITE_API_URL` = `https://seabatlle-tg.onrender.com` (или используйте `VITE_BACKEND_URL`)
+   - `VITE_WS_URL` = `https://seabatlle-tg.onrender.com` (опционально, если отличается от API URL)
+   - `VITE_BACKEND_URL` = `https://seabatlle-tg.onrender.com` (дефолтный URL бэкенда)
 
 7. Нажмите "Deploy site"
 
@@ -54,8 +55,9 @@ netlify deploy --prod
 1. Перейдите в настройки сайта → "Environment variables"
 
 2. Добавьте:
-   - `VITE_API_URL` = URL вашего бэкенда (например, `https://your-bot.onrender.com`)
-   - `VITE_WS_URL` = WebSocket URL (например, `wss://your-bot.onrender.com`)
+   - `VITE_API_URL` = `https://seabatlle-tg.onrender.com` (или используйте `VITE_BACKEND_URL`)
+   - `VITE_WS_URL` = `https://seabatlle-tg.onrender.com` (опционально)
+   - `VITE_BACKEND_URL` = `https://seabatlle-tg.onrender.com` (дефолтный URL бэкенда)
 
 ## Настройка редиректов
 
@@ -69,10 +71,12 @@ netlify deploy --prod
    - `/newapp` → выберите бота
    - Укажите URL: `https://your-app.netlify.app`
 
-3. Обновите переменную окружения `WEBAPP_URL` в вашем боте:
+3. Обновите переменную окружения `WEBAPP_URL` в вашем боте (в Render):
    ```
    WEBAPP_URL=https://your-app.netlify.app
    ```
+   
+   Это нужно для того, чтобы кнопка "Играть в веб-версии" в боте работала правильно.
 
 ## Проверка работы
 

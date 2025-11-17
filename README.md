@@ -44,7 +44,18 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-4. Отредактируйте `.env` и укажите ваш `BOT_TOKEN`
+4. Отредактируйте `.env` и укажите ваши переменные окружения:
+
+```env
+# Обязательные переменные
+BOT_TOKEN=your_telegram_bot_token
+
+# Опциональные переменные
+TELEGRAM_API=https://api.telegram.org
+BACKEND_URL=https://seabatlle-tg.onrender.com
+WEBAPP_URL=https://your-app.netlify.app
+PORT=5000
+```
 
 5. Запустите бота:
 
@@ -63,8 +74,10 @@ python bot.py
    - **Build Command**: `pip install --upgrade pip setuptools wheel && pip install -r requirements.txt`
    - **Start Command**: `python bot.py`
 5. Добавьте переменные окружения:
-   - `BOT_TOKEN` - ваш токен бота
+   - `BOT_TOKEN` - ваш токен бота (обязательно)
    - `TELEGRAM_API` (опционально) - кастомный API endpoint
+   - `BACKEND_URL` (опционально) - URL вашего бэкенда для CORS, по умолчанию `https://seabatlle-tg.onrender.com`
+   - `WEBAPP_URL` (опционально) - URL веб-приложения для кнопки Mini App
 6. Нажмите **Create Web Service**
 
 **Важно**: На Render используйте тип сервиса **Web Service**, но бот будет работать как worker (это нормально для Telegram ботов).
@@ -159,7 +172,10 @@ python bot.py
 2. Выберите тип: **Web Service**
 3. Build Command: `pip install -r requirements.txt`
 4. Start Command: `python bot.py`
-5. Добавьте переменную окружения `BOT_TOKEN`
+5. Добавьте переменные окружения:
+   - `BOT_TOKEN` - токен бота (обязательно)
+   - `BACKEND_URL` - URL бэкенда для CORS (опционально)
+   - `WEBAPP_URL` - URL веб-приложения (опционально)
 
 ### Другие платформы
 
