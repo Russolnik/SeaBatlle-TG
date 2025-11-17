@@ -7,9 +7,13 @@ const CELL_STATES = {
 }
 
 export default function Board({ board, size = 10, interactive = false, showShips = false, onCellClick }) {
-  if (!board || !Array.isArray(board)) {
-    return <div className="p-4 text-center text-gray-500">Загрузка...</div>
+  // Проверяем, что board существует и является массивом
+  if (!board || !Array.isArray(board) || board.length === 0) {
+    return <div className="p-4 text-center text-gray-500">Загрузка поля...</div>
   }
+  
+  // Если board пустой или неполный, создаем пустую доску
+  const actualSize = board.length || size
 
   const handleClick = (row, col) => {
     if (!interactive || !onCellClick) return
@@ -49,9 +53,9 @@ export default function Board({ board, size = 10, interactive = false, showShips
 
   return (
     <div className="inline-block p-2 bg-white dark:bg-gray-900 rounded-lg shadow-lg">
-      <div className="grid gap-0" style={{ gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))` }}>
-        {Array.from({ length: size }, (_, row) =>
-          Array.from({ length: size }, (_, col) => (
+      <div className="grid gap-0" style={{ gridTemplateColumns: `repeat(${actualSize}, minmax(0, 1fr))` }}>
+        {Array.from({ length: actualSize }, (_, row) =>
+          Array.from({ length: actualSize }, (_, col) => (
             <button
               key={`${row}-${col}`}
               className={getCellClass(row, col)}

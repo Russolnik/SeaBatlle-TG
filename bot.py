@@ -462,10 +462,10 @@ def api_auto_place(game_id):
         if not player:
             return jsonify({'error': 'Player not found'}), 400
         
-        config = get_ship_config(game.mode)
-        
-        # Автоматическая расстановка
-        auto_place_ships(player.board, player.ships, config)
+        # Автоматическая расстановка - функция возвращает (board, ships)
+        board, ships = auto_place_ships(game.mode)
+        player.board = board
+        player.ships = ships
         player.ready = True
         
         # Если оба игрока готовы, начинаем бой
@@ -481,7 +481,7 @@ def api_auto_place(game_id):
             'game_state': serialize_game_state(game, player_id)
         }), 200
     except Exception as e:
-        logger.error(f"Ошибка авто-расстановки: {e}")
+        logger.error(f"Ошибка авто-расстановки: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/game/<game_id>/surrender', methods=['POST'])
@@ -543,6 +543,10 @@ def serialize_game_state(game: GameState, player_id: str) -> dict:
                     'count': count - placed
                 })
     
+    # Убеждаемся, что board и attacks инициализированы
+    player_board = player.board if player and player.board else create_empty_board(config['size'])
+    player_attacks = player.attacks if player and player.attacks else create_empty_attacks(config['size'])
+    
     return {
         'id': game.id,
         'phase': phase,
@@ -558,8 +562,8 @@ def serialize_game_state(game: GameState, player_id: str) -> dict:
             player_id: {
                 'user_id': player.user_id if player else None,
                 'username': player.username if player else None,
-                'board': player.board if player else create_empty_board(config['size']),
-                'attacks': player.attacks if player else create_empty_attacks(config['size']),
+                'board': player_board,
+                'attacks': player_attacks,
                 'ships_remaining': get_remaining_ships(player) if player else 0,
                 'ready': player.ready if player else False
             },

@@ -30,7 +30,7 @@ def create_empty_attacks(size: int) -> list[list[str]]:
     return [['🌊' for _ in range(size)] for _ in range(size)]
 
 
-def get_ship_config(mode: Literal['classic', 'fast']) -> dict:
+def get_ship_config(mode: Literal['classic', 'fast', 'full']) -> dict:
     """Получить конфигурацию кораблей для режима"""
     return GAME_MODES[mode]
 
@@ -104,7 +104,7 @@ def place_ship(
     return cells
 
 
-def auto_place_ships(mode: Literal['classic', 'fast']) -> tuple[list[list[str]], list[dict]]:
+def auto_place_ships(mode: Literal['classic', 'fast', 'full']) -> tuple[list[list[str]], list[dict]]:
     """Автоматически расставить корабли"""
     config = get_ship_config(mode)
     size = config['size']
