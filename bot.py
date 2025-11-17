@@ -358,6 +358,10 @@ def api_attack(game_id):
         if 'error' in result:
             return jsonify({'error': result['error']}), 400
         
+        # Меняем ход только при промахе
+        if not result.get('hit', False):
+            game.current_player = 'p2' if player_id == 'p1' else 'p1'
+        
         # Обновляем время последнего хода
         game.last_move_time = datetime.now().timestamp()
         

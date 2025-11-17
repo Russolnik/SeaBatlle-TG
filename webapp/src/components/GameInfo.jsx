@@ -8,34 +8,43 @@ export default function GameInfo({ gameState, playerId, isMyTurn }) {
   if (!myPlayer) return null
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-4 mb-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className={`text-2xl ${isMyTurn ? 'animate-pulse' : ''}`}>
+    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-6 mb-6 border-2 border-blue-200 dark:border-blue-800">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className={`w-12 h-12 rounded-full flex items-center justify-center text-2xl ${
+            isMyTurn 
+              ? 'bg-green-500 animate-pulse' 
+              : 'bg-gray-400 dark:bg-gray-600'
+          }`}>
             {isMyTurn ? '👉' : '⏰'}
-          </span>
-          <span className="font-bold">
-            {isMyTurn ? 'Ваш ход' : 'Ход противника'}
-          </span>
+          </div>
+          <div>
+            <div className="text-sm text-gray-600 dark:text-gray-400">Текущий ход</div>
+            <div className="text-xl font-bold text-gray-800 dark:text-gray-200">
+              {isMyTurn ? 'Ваш ход' : 'Ход противника'}
+            </div>
+          </div>
         </div>
 
-        <div className="flex gap-4 text-sm">
-          <div>
-            <span className="text-gray-600 dark:text-gray-400">Ваши: </span>
-            <span className="font-bold">{myPlayer?.ships_remaining ?? 0}</span>
+        <div className="flex gap-6 text-sm">
+          <div className="bg-blue-100 dark:bg-blue-900/30 px-4 py-2 rounded-lg">
+            <div className="text-gray-600 dark:text-gray-400 text-xs">Ваши корабли</div>
+            <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{myPlayer?.ships_remaining ?? 0}</div>
           </div>
           {opponent && (
-            <div>
-              <span className="text-gray-600 dark:text-gray-400">Противник: </span>
-              <span className="font-bold">{opponent?.ships_remaining ?? 0}</span>
+            <div className="bg-red-100 dark:bg-red-900/30 px-4 py-2 rounded-lg">
+              <div className="text-gray-600 dark:text-gray-400 text-xs">Противник</div>
+              <div className="text-2xl font-bold text-red-600 dark:text-red-400">{opponent?.ships_remaining ?? 0}</div>
             </div>
           )}
         </div>
       </div>
 
       {gameState.last_move && (
-        <div className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-          {gameState.last_move}
+        <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+          <div className="text-sm text-gray-600 dark:text-gray-400">
+            Последний ход: <span className="font-semibold text-gray-800 dark:text-gray-200">{gameState.last_move}</span>
+          </div>
         </div>
       )}
     </div>

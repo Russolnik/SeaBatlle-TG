@@ -1,8 +1,18 @@
+import { useState, useEffect } from 'react'
 import Board from './Board'
 import GameInfo from './GameInfo'
 import { api } from '../utils/api'
 
 export default function GameBoard({ gameState, playerId, onStateUpdate, socket }) {
+  const [isMyTurn, setIsMyTurn] = useState(false)
+  const [attacking, setAttacking] = useState(false)
+
+  useEffect(() => {
+    if (gameState) {
+      setIsMyTurn(gameState.current_player === playerId)
+    }
+  }, [gameState, playerId])
+
   if (!gameState || !playerId || !gameState.players) {
     return <div className="flex items-center justify-center min-h-screen">Загрузка...</div>
   }
@@ -15,12 +25,11 @@ export default function GameBoard({ gameState, playerId, onStateUpdate, socket }
     return <div className="flex items-center justify-center min-h-screen">Ошибка: игрок не найден</div>
   }
 
-  const isMyTurn = gameState.current_player === playerId
-
   const handleAttack = async (row, col) => {
-    if (!isMyTurn) return
+    if (!isMyTurn || attacking) return
 
     try {
+      setAttacking(true)
       const res = await api.post(`/api/game/${gameState.id}/attack`, {
         row,
         col,
@@ -32,6 +41,8 @@ export default function GameBoard({ gameState, playerId, onStateUpdate, socket }
       }
     } catch (err) {
       alert(err.message || 'Ошибка атаки')
+    } finally {
+      setAttacking(false)
     }
   }
 
@@ -48,35 +59,49 @@ export default function GameBoard({ gameState, playerId, onStateUpdate, socket }
   }
 
   return (
-    <div className="min-h-screen p-4 pb-20">
-      <div className="max-w-4xl mx-auto">
+    <div className="min-h-screen p-4 pb-20 bg-gradient-to-br from-blue-50 to-blue-100 dark:from-gray-900 dark:to-gray-800">
+      <div className="max-w-6xl mx-auto">
         <GameInfo gameState={gameState} playerId={playerId} isMyTurn={isMyTurn} />
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-          <div>
-            <h2 className="text-lg font-bold mb-2 text-center">Ваше поле</h2>
-            <Board
-              board={myPlayer.board}
-              size={gameState.config?.size || 10}
-              showShips={true}
-            />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-4">
+            <h2 className="text-xl font-bold mb-4 text-center text-gray-800 dark:text-gray-200">
+              Ваше поле
+            </h2>
+            <div className="flex justify-center">
+              <Board
+                board={myPlayer.board}
+                size={gameState.config?.size || 10}
+                showShips={true}
+              />
+            </div>
           </div>
 
-          <div>
-            <h2 className="text-lg font-bold mb-2 text-center">Поле противника</h2>
-            <Board
-              board={myPlayer.attacks}
-              size={gameState.config?.size || 10}
-              interactive={isMyTurn}
-              onCellClick={handleAttack}
-            />
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-4">
+            <h2 className="text-xl font-bold mb-4 text-center text-gray-800 dark:text-gray-200">
+              Поле противника
+            </h2>
+            <div className="flex justify-center">
+              <Board
+                board={myPlayer.attacks}
+                size={gameState.config?.size || 10}
+                interactive={isMyTurn && !attacking}
+                onCellClick={handleAttack}
+              />
+            </div>
+            {attacking && (
+              <div className="text-center mt-2 text-blue-600 dark:text-blue-400">
+                Атака...
+              </div>
+            )}
           </div>
         </div>
 
         <div className="mt-6 flex justify-center">
           <button
             onClick={handleSurrender}
-            className="px-6 py-3 bg-red-500 text-white rounded-lg hover:bg-red-600"
+            disabled={attacking}
+            className="px-8 py-3 bg-red-500 text-white rounded-xl hover:bg-red-600 disabled:opacity-50 shadow-lg font-semibold transition-all"
           >
             🚩 Сдаться
           </button>

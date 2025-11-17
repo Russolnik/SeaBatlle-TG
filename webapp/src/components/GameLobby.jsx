@@ -23,7 +23,7 @@ export default function GameLobby({ gameId, onCreateGame, user }) {
     const urlParams = new URLSearchParams(window.location.search)
     const botUsername = urlParams.get('bot') || 
                        window.Telegram?.WebApp?.initDataUnsafe?.start_param?.split('_')[0] || 
-                       'your_bot_username'
+                       '@Tester_24513821_bot'
     const shareLink = `https://t.me/${botUsername}?start=join_${gameId}`
 
     return (
