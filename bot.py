@@ -232,6 +232,7 @@ def api_create_game():
         
         game.players['p1'] = p1
         games[game_id] = game
+        logger.info(f"API: Игра {game_id} создана через Mini App. Активных игр: {len(games)}")
         
         return jsonify({
             'game_id': game_id,
@@ -252,10 +253,16 @@ def api_get_game_state(game_id):
     try:
         player_id = request.args.get('player_id', 'p1')
         
+        logger.info(f"API: Запрос состояния игры {game_id}, player_id={player_id}, всего игр: {len(games)}")
+        if len(games) > 0:
+            logger.info(f"API: Доступные ID игр (первые 10): {list(games.keys())[:10]}")
+        
         if game_id not in games:
+            logger.warning(f"API: Игра {game_id} не найдена в словаре games")
             return jsonify({'error': 'Game not found'}), 404
         
         game = games[game_id]
+        logger.info(f"API: Игра {game_id} найдена, фаза: setup/battle, игроков: {len([p for p in game.players.values() if p])}")
         return jsonify(serialize_game_state(game, player_id)), 200
     except Exception as e:
         logger.error(f"Ошибка получения состояния: {e}")
