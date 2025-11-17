@@ -67,45 +67,32 @@ export default function GameSetup({ gameState, playerId, onStateUpdate, socket }
   }
 
   const handleRemoveShip = async (shipIndex) => {
-    if (!confirm('Удалить этот корабль?')) return
+    if (!confirm('Удалить этот корабль? Он вернется в список доступных для размещения.')) return
 
     try {
       setPlacing(true)
-      const ship = myPlayer.ships[shipIndex]
-      if (ship && ship.cells) {
-        // Очищаем клетки корабля на доске локально
-        const newBoard = myPlayer.board.map(row => [...row])
-        for (const [r, c] of ship.cells) {
-          if (r < newBoard.length && c < newBoard[r].length) {
-            newBoard[r][c] = '🌊'
-          }
-        }
-        const newShips = [...myPlayer.ships]
-        newShips.splice(shipIndex, 1)
-        
-        // Обновляем локально
-        const updatedPlayer = {
-          ...myPlayer,
-          board: newBoard,
-          ships: newShips,
-          ready: false
-        }
-        onStateUpdate({
-          ...gameState,
-          players: {
-            ...gameState.players,
-            [playerId]: updatedPlayer
-          }
-        })
+      const res = await api.post(`/api/game/${gameState.id}/remove-ship`, {
+        ship_index: shipIndex,
+        player_id: playerId
+      })
+      if (res.game_state) {
+        onStateUpdate(res.game_state)
       }
     } catch (err) {
-      alert(err.message || 'Ошибка')
+      alert(err.message || 'Ошибка удаления корабля')
     } finally {
       setPlacing(false)
     }
   }
 
   const handleReady = async () => {
+    // Проверяем, все ли корабли размещены
+    const shipsToPlace = gameState.ships_to_place || []
+    if (shipsToPlace.length > 0) {
+      alert(`Не все корабли размещены! Осталось разместить: ${shipsToPlace.map(s => `${s.count}×${s.size}`).join(', ')}`)
+      return
+    }
+
     if (!confirm('Готовы начать игру? После подтверждения начнется бой.')) return
 
     try {

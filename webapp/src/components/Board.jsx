@@ -2,11 +2,12 @@ export default function Board({ board, size = 10, interactive = false, showShips
   // Проверяем, что board существует и является массивом
   if (!board || !Array.isArray(board) || board.length === 0) {
     // Создаем пустую доску для отображения
+    const emptySize = size || 10
     return (
       <div className="inline-block p-4 bg-gradient-to-br from-sky-100 via-blue-50 to-cyan-50 dark:from-gray-800 dark:via-gray-800 dark:to-gray-900 rounded-2xl shadow-2xl border-4 border-blue-300 dark:border-blue-700">
-        <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))` }}>
-          {Array.from({ length: size }, (_, row) =>
-            Array.from({ length: size }, (_, col) => (
+        <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${emptySize}, minmax(0, 1fr))` }}>
+          {Array.from({ length: emptySize }, (_, row) =>
+            Array.from({ length: emptySize }, (_, col) => (
               <div
                 key={`${row}-${col}`}
                 className="w-7 h-7 sm:w-9 sm:h-9 flex items-center justify-center border-2 border-blue-400 dark:border-blue-600 bg-blue-200 dark:bg-gray-700 rounded-md transition-all"
@@ -18,7 +19,7 @@ export default function Board({ board, size = 10, interactive = false, showShips
     )
   }
   
-  const actualSize = board.length || size
+  const actualSize = Math.max(board.length, size) || size
 
   const handleClick = (row, col) => {
     if (!interactive || !onCellClick) return
@@ -30,8 +31,8 @@ export default function Board({ board, size = 10, interactive = false, showShips
   }
 
   const getCellState = (row, col) => {
-    if (!board[row] || !board[row][col]) return 'empty'
-    const cell = board[row][col]
+    if (!normalizedBoard || !normalizedBoard[row] || !normalizedBoard[row][col]) return 'empty'
+    const cell = normalizedBoard[row][col]
     
     if (cell === '🟥' || cell === 'ship') return 'ship'
     if (cell === '🔥' || cell === 'hit') return 'hit'
@@ -79,6 +80,24 @@ export default function Board({ board, size = 10, interactive = false, showShips
     }
     
     return classes
+  }
+
+  // Если доска не нормализована, показываем пустую
+  if (!normalizedBoard || !Array.isArray(normalizedBoard) || normalizedBoard.length === 0) {
+    return (
+      <div className="inline-block p-4 bg-gradient-to-br from-sky-100 via-blue-50 to-cyan-50 dark:from-gray-800 dark:via-gray-800 dark:to-gray-900 rounded-2xl shadow-2xl border-4 border-blue-300 dark:border-blue-700">
+        <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${actualSize}, minmax(0, 1fr))` }}>
+          {Array.from({ length: actualSize }, (_, row) =>
+            Array.from({ length: actualSize }, (_, col) => (
+              <div
+                key={`${row}-${col}`}
+                className="w-7 h-7 sm:w-9 sm:h-9 flex items-center justify-center border-2 border-blue-400 dark:border-blue-600 bg-blue-200 dark:bg-gray-700 rounded-md transition-all"
+              />
+            ))
+          )}
+        </div>
+      </div>
+    )
   }
 
   return (

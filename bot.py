@@ -336,6 +336,51 @@ def api_join_game(game_id):
         game.players['p2'] = p2
         logger.info(f"API: Пользователь {user_id} присоединился к игре {game_id} как p2")
         
+        # Отправляем уведомление в группу, если игра была создана там
+        if game.group_id:
+            try:
+                import asyncio
+                
+                async def send_group_notification():
+                    group_notification = f"✅ @{p2.username} присоединился к игре!\n\n"
+                    group_notification += f"🎮 Игроки:\n"
+                    group_notification += f"1️⃣ @{game.players['p1'].username}\n"
+                    group_notification += f"2️⃣ @{p2.username}\n\n"
+                    group_notification += f"ID игры: {game_id}\n"
+                    group_notification += f"Игра начинается! Откройте Mini App для расстановки кораблей."
+                    
+                    webapp_url = os.getenv("WEBAPP_URL", "https://seabatl.netlify.app")
+                    bot_info_dict = await get_bot_info()
+                    bot_username = bot_info_dict.get('username', '')
+                    
+                    from aiogram.types import InlineKeyboardButton, WebAppInfo, InlineKeyboardMarkup
+                    
+                    group_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                        [
+                            InlineKeyboardButton(
+                                text="🎮 Открыть приложение",
+                                web_app=WebAppInfo(url=f"{webapp_url}?gameId={game_id}&bot={bot_username}")
+                            )
+                        ]
+                    ])
+                    
+                    group_msg = await bot.send_message(
+                        chat_id=game.group_id,
+                        text=group_notification,
+                        reply_markup=group_keyboard
+                    )
+                    game.group_messages.append(group_msg.message_id)
+                    logger.info(f"✅ Уведомление о присоединении (API) отправлено в группу {game.group_id}")
+                
+                # Вызываем асинхронную функцию из синхронного контекста
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    asyncio.create_task(send_group_notification())
+                else:
+                    loop.run_until_complete(send_group_notification())
+            except Exception as e:
+                logger.error(f"Ошибка отправки уведомления в группу (API): {e}", exc_info=True)
+        
         # Уведомляем через WebSocket
         socketio.emit('game_state', serialize_game_state(game, 'p1'), room=f'game_{game_id}')
         socketio.emit('game_state', serialize_game_state(game, 'p2'), room=f'game_{game_id}')
@@ -490,15 +535,62 @@ def api_place_ship(game_id):
                 game.current_player = 'p1'
                 game.phase = 'battle'
         
-        # Уведомляем через WebSocket
-        socketio.emit('game_state', serialize_game_state(game, 'p1'), room=f'game_{game_id}')
-        socketio.emit('game_state', serialize_game_state(game, 'p2'), room=f'game_{game_id}')
+        # Уведомляем через WebSocket обоих игроков
+        state_p1 = serialize_game_state(game, 'p1')
+        state_p2 = serialize_game_state(game, 'p2')
+        socketio.emit('game_state', state_p1, room=f'game_{game_id}')
+        socketio.emit('game_state', state_p2, room=f'game_{game_id}')
         
         return jsonify({
             'game_state': serialize_game_state(game, player_id)
         }), 200
     except Exception as e:
-        logger.error(f"Ошибка размещения корабля: {e}")
+        logger.error(f"Ошибка размещения корабля: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/game/<game_id>/remove-ship', methods=['POST'])
+def api_remove_ship(game_id):
+    """Удалить корабль"""
+    try:
+        data = request.json
+        ship_index = data.get('ship_index')
+        player_id = data.get('player_id', 'p1')
+        
+        if game_id not in games:
+            return jsonify({'error': 'Game not found'}), 404
+        
+        game = games[game_id]
+        player = game.get_player(player_id)
+        
+        if not player:
+            return jsonify({'error': 'Player not found'}), 400
+        
+        if ship_index is None or ship_index < 0 or ship_index >= len(player.ships):
+            return jsonify({'error': 'Invalid ship index'}), 400
+        
+        # Удаляем корабль
+        ship = player.ships[ship_index]
+        if ship and ship.get('cells'):
+            # Очищаем клетки корабля на доске
+            for r, c in ship['cells']:
+                if 0 <= r < len(player.board) and 0 <= c < len(player.board[r]):
+                    player.board[r][c] = '🌊'
+        
+        # Удаляем корабль из списка
+        player.ships.pop(ship_index)
+        player.ready = False  # Сбрасываем готовность
+        
+        # Уведомляем через WebSocket обоих игроков
+        state_p1 = serialize_game_state(game, 'p1')
+        state_p2 = serialize_game_state(game, 'p2')
+        socketio.emit('game_state', state_p1, room=f'game_{game_id}')
+        socketio.emit('game_state', state_p2, room=f'game_{game_id}')
+        
+        return jsonify({
+            'game_state': serialize_game_state(game, player_id)
+        }), 200
+    except Exception as e:
+        logger.error(f"Ошибка удаления корабля: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/game/<game_id>/auto-place', methods=['POST'])
@@ -527,9 +619,11 @@ def api_auto_place(game_id):
             logger.error(f"Ошибка в auto_place_ships для режима {game.mode}: {e}", exc_info=True)
             raise
         
-        # Уведомляем через WebSocket
-        socketio.emit('game_state', serialize_game_state(game, 'p1'), room=f'game_{game_id}')
-        socketio.emit('game_state', serialize_game_state(game, 'p2'), room=f'game_{game_id}')
+        # Уведомляем через WebSocket обоих игроков
+        state_p1 = serialize_game_state(game, 'p1')
+        state_p2 = serialize_game_state(game, 'p2')
+        socketio.emit('game_state', state_p1, room=f'game_{game_id}')
+        socketio.emit('game_state', state_p2, room=f'game_{game_id}')
         
         return jsonify({
             'game_state': serialize_game_state(game, player_id)
@@ -630,15 +724,22 @@ def api_ready(game_id):
         
         placed_ships = {}
         for ship in player.ships:
-            placed_ships[ship['size']] = placed_ships.get(ship['size'], 0) + 1
+            if ship and ship.get('size'):
+                placed_ships[ship['size']] = placed_ships.get(ship['size'], 0) + 1
         
-        all_placed = all(
-            placed_ships.get(size, 0) >= count
-            for size, count in required_ships_dict.items()
-        )
+        # Проверяем, что размещено нужное количество кораблей каждого размера
+        all_placed = True
+        missing_ships = []
+        for size, count in required_ships_dict.items():
+            placed = placed_ships.get(size, 0)
+            if placed < count:
+                all_placed = False
+                missing_ships.append(f"{count - placed}×{size}")
         
         if not all_placed:
-            return jsonify({'error': 'Not all ships placed'}), 400
+            error_msg = f'Не все корабли размещены! Осталось разместить: {", ".join(missing_ships)}'
+            logger.warning(f"Игрок {player_id} попытался начать игру без всех кораблей: {error_msg}")
+            return jsonify({'error': error_msg}), 400
         
         player.ready = True
         
@@ -1222,10 +1323,11 @@ async def cmd_play(message: Message):
                 logger.error(f"Не удалось получить username бота для игры {game_id}")
                 bot_username = "your_bot_username"  # Fallback
             
-            group_text = f"🎮 Новая игра создана!\n\n"
-            group_text += f"Создатель: @{p1.username}\n"
-            group_text += f"ID игры: {game_id}\n\n"
-            group_text += f"Присоединяйтесь к игре!"
+            group_text = f"🎮 Новая игра «Морской бой»!\n\n"
+            group_text += f"👤 Создатель: @{p1.username}\n"
+            group_text += f"🆔 ID игры: {game_id}\n\n"
+            group_text += f"⏳ Ожидание второго игрока...\n\n"
+            group_text += f"Нажмите кнопку ниже, чтобы присоединиться!"
             
             # Клавиатура с кнопкой присоединения
             from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
@@ -1251,6 +1353,130 @@ async def cmd_play(message: Message):
             logger.info(f"✅ Сообщение успешно отправлено в группу {game.group_id}, message_id: {group_msg.message_id}, всего сообщений в группе: {len(game.group_messages)}")
         except Exception as e:
             logger.error(f"❌ Ошибка отправки сообщения в группу {game.group_id}: {e}", exc_info=True)
+
+
+@dp.message(Command("start"))
+async def cmd_start(message: Message):
+    """Команда /start - обработка присоединения к игре через ссылку"""
+    args = message.text.split()[1:] if len(message.text.split()) > 1 else []
+    
+    if not args:
+        # Обычный /start без параметров
+        await message.answer(
+            "👋 Добро пожаловать в игру «Морской бой»!\n\n"
+            "Используйте /play для создания новой игры или /help для помощи."
+        )
+        return
+    
+    start_param = args[0]
+    
+    # Обработка присоединения к игре: /start join_<game_id>
+    if start_param.startswith("join_"):
+        game_id = start_param.replace("join_", "")
+        
+        if game_id not in games:
+            await message.answer(f"❌ Игра {game_id} не найдена или уже завершена.")
+            return
+        
+        game = games[game_id]
+        user = message.from_user
+        
+        # Проверяем, не присоединился ли уже пользователь
+        for pid, player in game.players.items():
+            if player and player.user_id == user.id:
+                # Пользователь уже в игре - отправляем сообщение с кнопкой Mini App
+                webapp_url = os.getenv("WEBAPP_URL", "https://seabatl.netlify.app")
+                bot_info = await bot.get_me()
+                from aiogram.types import InlineKeyboardButton, WebAppInfo, InlineKeyboardMarkup
+                
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="🎮 Открыть приложение",
+                            web_app=WebAppInfo(url=f"{webapp_url}?gameId={game_id}&bot={bot_info.username}")
+                        )
+                    ]
+                ])
+                
+                await message.answer(
+                    f"✅ Вы уже участвуете в игре {game_id}!\n\n"
+                    f"Откройте Mini App для продолжения игры.",
+                    reply_markup=keyboard
+                )
+                return
+        
+        # Проверяем, есть ли место для второго игрока
+        if game.players['p2']:
+            await message.answer(f"❌ Игра {game_id} уже заполнена.")
+            return
+        
+        # Присоединяем пользователя к игре
+        config = get_ship_config(game.mode)
+        p2 = Player(
+            user_id=user.id,
+            username=user.username or user.first_name or f"user_{user.id}",
+            board=create_empty_board(config['size']),
+            attacks=create_empty_attacks(config['size'])
+        )
+        
+        game.players['p2'] = p2
+        logger.info(f"Пользователь {user.id} (@{p2.username}) присоединился к игре {game_id} через /start")
+        
+        # Отправляем уведомление в группу, если игра была создана там
+        if game.group_id:
+            try:
+                group_notification = f"✅ @{p2.username} присоединился к игре!\n\n"
+                group_notification += f"🎮 Игроки:\n"
+                group_notification += f"1️⃣ @{game.players['p1'].username}\n"
+                group_notification += f"2️⃣ @{p2.username}\n\n"
+                group_notification += f"ID игры: {game_id}\n"
+                group_notification += f"Игра начинается! Откройте Mini App для расстановки кораблей."
+                
+                webapp_url = os.getenv("WEBAPP_URL", "https://seabatl.netlify.app")
+                bot_info = await bot.get_me()
+                from aiogram.types import InlineKeyboardButton, WebAppInfo, InlineKeyboardMarkup
+                
+                group_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="🎮 Открыть приложение",
+                            web_app=WebAppInfo(url=f"{webapp_url}?gameId={game_id}&bot={bot_info.username}")
+                        )
+                    ]
+                ])
+                
+                group_msg = await bot.send_message(
+                    chat_id=game.group_id,
+                    text=group_notification,
+                    reply_markup=group_keyboard
+                )
+                game.group_messages.append(group_msg.message_id)
+                logger.info(f"✅ Уведомление о присоединении отправлено в группу {game.group_id}")
+            except Exception as e:
+                logger.error(f"Ошибка отправки уведомления в группу: {e}", exc_info=True)
+        
+        # Отправляем сообщение присоединившемуся игроку
+        webapp_url = os.getenv("WEBAPP_URL", "https://seabatl.netlify.app")
+        bot_info = await bot.get_me()
+        from aiogram.types import InlineKeyboardButton, WebAppInfo, InlineKeyboardMarkup
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🎮 Открыть приложение",
+                    web_app=WebAppInfo(url=f"{webapp_url}?gameId={game_id}&bot={bot_info.username}")
+                )
+            ]
+        ])
+        
+        await message.answer(
+            f"✅ Вы присоединились к игре {game_id}!\n\n"
+            f"Создатель: @{game.players['p1'].username}\n\n"
+            f"Откройте Mini App для расстановки кораблей и начала игры!",
+            reply_markup=keyboard
+        )
+    else:
+        await message.answer("👋 Добро пожаловать! Используйте /play для создания игры.")
 
 
 @dp.message(Command("stop"))

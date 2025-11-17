@@ -50,27 +50,34 @@ function App() {
   useEffect(() => {
     if (!socket || !connected) return
 
-    socket.on('game_state', (state) => {
-      if (state) {
+    const handleGameState = (state) => {
+      if (state && state.id) {
         // Сохраняем позицию скролла перед обновлением
         const scrollY = window.scrollY
+        
+        // Обновляем состояние игры
         setGameState(state)
-        // Сохраняем gameId при обновлении
-        if (state.id) {
-          setGameId(state.id)
-          localStorage.setItem('activeGameId', state.id)
+        setGameId(state.id)
+        localStorage.setItem('activeGameId', state.id)
+        
+        // Обновляем playerId если он изменился
+        if (state.player_id) {
+          setPlayerId(state.player_id)
         }
+        
         // Восстанавливаем позицию скролла после обновления
         requestAnimationFrame(() => {
           window.scrollTo(0, scrollY)
         })
       }
-    })
+    }
+
+    socket.on('game_state', handleGameState)
 
     return () => {
-      socket.off('game_state')
+      socket.off('game_state', handleGameState)
     }
-  }, [socket, connected])
+  }, [socket, connected, gameId])
 
   const loadActiveGame = async () => {
     if (!user) return

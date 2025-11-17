@@ -9,10 +9,11 @@ export default function GameBoard({ gameState, playerId, onStateUpdate, socket }
   const containerRef = useRef(null)
 
   useEffect(() => {
-    if (gameState) {
-      setIsMyTurn(gameState.current_player === playerId)
+    if (gameState && playerId) {
+      const isTurn = gameState.current_player === playerId
+      setIsMyTurn(isTurn)
     }
-  }, [gameState, playerId])
+  }, [gameState?.current_player, playerId])
 
   // Предотвращаем скролл наверх при обновлении
   useEffect(() => {
