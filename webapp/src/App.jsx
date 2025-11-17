@@ -36,31 +36,43 @@ function App() {
     
     if (id) {
       setGameId(id)
-      loadGameState(id)
+      // Не загружаем сразу, ждем пока user будет готов
+      if (user && user.id) {
+        loadGameState(id)
+      }
     }
     // Если gameId нет - показываем экран создания игры (через GameLobby)
-  }, [initialized, authLoading])
+  }, [initialized, authLoading, user])
 
   // Слушаем обновления через WebSocket
   useEffect(() => {
-    if (!socket || !connected) return
+    if (!socket || !connected || !gameId) return
 
-    socket.on('game_state', (state) => {
-      setGameState(state)
-    })
+    const handleGameState = (state) => {
+      if (state && state.players) {
+        setGameState(state)
+      }
+    }
 
-    socket.on('move', (data) => {
-      loadGameState(gameId)
-    })
+    const handleMove = (data) => {
+      if (gameId) {
+        loadGameState(gameId)
+      }
+    }
 
-    socket.on('error', (error) => {
-      setError(error.message)
-    })
+    const handleError = (error) => {
+      console.error('WebSocket error:', error)
+      setError(error?.message || 'Ошибка WebSocket')
+    }
+
+    socket.on('game_state', handleGameState)
+    socket.on('move', handleMove)
+    socket.on('error', handleError)
 
     return () => {
-      socket.off('game_state')
-      socket.off('move')
-      socket.off('error')
+      socket.off('game_state', handleGameState)
+      socket.off('move', handleMove)
+      socket.off('error', handleError)
     }
   }, [socket, connected, gameId])
 
@@ -87,10 +99,24 @@ function App() {
 
   const loadGameState = async (id) => {
     try {
+      setLoading(true)
+      setError(null)
+      
       const userData = user || { id: Date.now() }
+      
+      if (!userData.id) {
+        setError('Пользователь не авторизован')
+        return
+      }
       
       // Сначала пытаемся получить состояние игры
       const state = await api.get(`/api/game/${id}/state?player_id=${playerId || 'p1'}`)
+      
+      // Проверяем, что state валиден
+      if (!state || !state.players) {
+        setError('Неверный формат данных игры')
+        return
+      }
       
       // Проверяем, является ли текущий пользователь участником игры
       const p1 = state.players?.p1
@@ -104,38 +130,61 @@ function App() {
             user_id: userData.id,
             username: userData.username || userData.first_name || `user_${userData.id}`
           })
-          const { player_id, game_state } = joinResponse
-          setPlayerId(player_id)
-          setGameState(game_state)
-          return
+          
+          if (joinResponse && joinResponse.game_state) {
+            const { player_id, game_state } = joinResponse
+            setPlayerId(player_id)
+            setGameState(game_state)
+            setLoading(false)
+            return
+          }
         } catch (joinErr) {
           console.error('Ошибка присоединения:', joinErr)
-          // Если не удалось присоединиться, показываем состояние игры
+          setError(joinErr.message || 'Не удалось присоединиться к игре')
         }
       }
       
-      setGameState(state)
-      if (state.player_id) {
-        setPlayerId(state.player_id)
+      // Убеждаемся, что все необходимые данные есть
+      if (state.players && (state.players.p1 || state.players.p2)) {
+        setGameState(state)
+        if (state.player_id) {
+          setPlayerId(state.player_id)
+        } else if (p1 && p1.user_id === userData.id) {
+          setPlayerId('p1')
+        } else if (p2 && p2.user_id === userData.id) {
+          setPlayerId('p2')
+        }
+      } else {
+        setError('Игра не содержит игроков')
       }
     } catch (err) {
+      console.error('Ошибка загрузки игры:', err)
       // Если игра не найдена, пытаемся присоединиться
-      if (err.message.includes('not found') || err.message.includes('404')) {
+      if (err.message && (err.message.includes('not found') || err.message.includes('404'))) {
         try {
           const userData = user || { id: Date.now(), username: 'Player' }
           const joinResponse = await api.post(`/api/game/${id}/join`, {
             user_id: userData.id,
             username: userData.username || userData.first_name || `user_${userData.id}`
           })
-          const { player_id, game_state } = joinResponse
-          setPlayerId(player_id)
-          setGameState(game_state)
+          
+          if (joinResponse && joinResponse.game_state) {
+            const { player_id, game_state } = joinResponse
+            setPlayerId(player_id)
+            setGameState(game_state)
+            setError(null)
+          } else {
+            setError('Не удалось присоединиться к игре')
+          }
         } catch (joinErr) {
+          console.error('Ошибка присоединения:', joinErr)
           setError(joinErr.message || 'Ошибка при присоединении к игре')
         }
       } else {
         setError(err.message || 'Ошибка при загрузке игры')
       }
+    } finally {
+      setLoading(false)
     }
   }
 

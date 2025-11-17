@@ -16,13 +16,25 @@ export default function Board({
   onCellClick,
   selectedCell = null,
 }) {
+  // Проверяем, что board существует и является массивом
+  if (!board || !Array.isArray(board)) {
+    return (
+      <div className="p-4 text-center text-gray-500">
+        Загрузка поля...
+      </div>
+    )
+  }
+
   const letters = useMemo(() => {
     return Array.from({ length: size }, (_, i) => String.fromCharCode(65 + i))
   }, [size])
 
   const handleCellClick = (row, col) => {
     if (!interactive || !onCellClick) return
-    if (board[row][col] !== CELL_STATES.EMPTY && board[row][col] !== '🌊') return
+    if (!board || !board[row]) return
+    
+    const cell = board[row][col]
+    if (cell !== CELL_STATES.EMPTY && cell !== '🌊') return
     
     onCellClick(row, col)
   }
@@ -83,7 +95,8 @@ export default function Board({
             
             {/* Клетки поля */}
             {Array.from({ length: size }, (_, col) => {
-              const cell = board[row]?.[col] || CELL_STATES.EMPTY
+              // Безопасное получение значения клетки
+              const cell = (board[row] && board[row][col]) ? board[row][col] : CELL_STATES.EMPTY
               return (
                 <button
                   key={`cell-${row}-${col}`}

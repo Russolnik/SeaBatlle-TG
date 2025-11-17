@@ -1,11 +1,23 @@
 export default function GameInfo({ gameState, playerId, isMyTurn }) {
-  if (!gameState) return null
+  if (!gameState || !gameState.players || !playerId) {
+    return (
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-4 mb-4">
+        <p className="text-gray-500">Загрузка информации...</p>
+      </div>
+    )
+  }
 
   const myPlayer = gameState.players[playerId]
   const opponentId = playerId === 'p1' ? 'p2' : 'p1'
   const opponent = gameState.players[opponentId]
 
-  if (!myPlayer || !opponent) return null
+  if (!myPlayer) {
+    return (
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-4 mb-4">
+        <p className="text-red-500">Ошибка: данные игрока не найдены</p>
+      </div>
+    )
+  }
 
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60)
@@ -35,11 +47,11 @@ export default function GameInfo({ gameState, playerId, isMyTurn }) {
         <div className="flex gap-4 text-sm">
           <div>
             <span className="text-gray-600 dark:text-gray-400">Ваши корабли: </span>
-            <span className="font-bold">{myPlayer.ships_remaining || 0}</span>
+            <span className="font-bold">{myPlayer?.ships_remaining ?? 0}</span>
           </div>
           <div>
             <span className="text-gray-600 dark:text-gray-400">Корабли противника: </span>
-            <span className="font-bold">{opponent.ships_remaining || 0}</span>
+            <span className="font-bold">{opponent?.ships_remaining ?? 0}</span>
           </div>
         </div>
       </div>

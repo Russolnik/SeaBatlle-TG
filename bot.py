@@ -558,8 +558,8 @@ def serialize_game_state(game: GameState, player_id: str) -> dict:
             player_id: {
                 'user_id': player.user_id if player else None,
                 'username': player.username if player else None,
-                'board': player.board if player else None,
-                'attacks': player.attacks if player else None,
+                'board': player.board if player else create_empty_board(config['size']),
+                'attacks': player.attacks if player else create_empty_attacks(config['size']),
                 'ships_remaining': get_remaining_ships(player) if player else 0,
                 'ready': player.ready if player else False
             },

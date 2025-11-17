@@ -52,13 +52,61 @@ export default function GameBoard({ gameState, playerId, onStateUpdate, socket }
     }
   }
 
-  if (!gameState) return null
+  if (!gameState) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+          <p className="text-gray-600 dark:text-gray-400">Загрузка игры...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!gameState.players || !playerId) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <p className="text-red-500">Ошибка: данные игрока не найдены</p>
+      </div>
+    )
+  }
 
   const myPlayer = gameState.players[playerId]
   const opponentId = playerId === 'p1' ? 'p2' : 'p1'
   const opponent = gameState.players[opponentId]
 
-  if (!myPlayer || !opponent) return null
+  if (!myPlayer) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <p className="text-red-500">Ошибка: ваш игрок не найден</p>
+      </div>
+    )
+  }
+
+  if (!opponent) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <p className="text-gray-600 dark:text-gray-400">Ожидание противника...</p>
+      </div>
+    )
+  }
+
+  // Проверяем, что board существует
+  if (!myPlayer.board || !Array.isArray(myPlayer.board)) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <p className="text-red-500">Ошибка: поле не инициализировано</p>
+      </div>
+    )
+  }
+
+  if (!myPlayer.attacks || !Array.isArray(myPlayer.attacks)) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <p className="text-red-500">Ошибка: поле атак не инициализировано</p>
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen p-4 pb-20">

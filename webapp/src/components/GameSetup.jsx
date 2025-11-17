@@ -47,8 +47,30 @@ export default function GameSetup({ gameState, playerId, onStateUpdate, socket }
     handlePlaceShip(row, col, shipPosition.horizontal)
   }
 
+  if (!gameState || !gameState.players) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <p className="text-red-500">Ошибка: данные игры не найдены</p>
+      </div>
+    )
+  }
+
   const myPlayer = gameState.players[playerId]
-  if (!myPlayer) return null
+  if (!myPlayer) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <p className="text-red-500">Ошибка: ваш игрок не найден</p>
+      </div>
+    )
+  }
+
+  if (!myPlayer.board || !Array.isArray(myPlayer.board)) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <p className="text-red-500">Ошибка: поле не инициализировано</p>
+      </div>
+    )
+  }
 
   const shipsToPlace = gameState.ships_to_place || []
 
