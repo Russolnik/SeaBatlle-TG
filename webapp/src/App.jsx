@@ -16,18 +16,18 @@ function App() {
   const { user, authToken, loading: authLoading } = useTelegramAuth()
   const { socket, connected } = useWebSocket(gameId, authToken)
 
-  // Получаем gameId, roomCode и group_id из URL или localStorage
+  // Получаем gameId и group_id из URL или localStorage
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const urlGameId = params.get('gameId')
     const urlGroupId = params.get('group_id')
     
-    // Обработка startapp=room-XXXXXX (Mini App deep link)
+    // Обработка startapp=room-XXXXXX (для присоединения к игре)
     const startapp = params.get('startapp')
     if (startapp && startapp.startsWith('room-')) {
       const roomCode = startapp.replace('room-', '')
+      // Сохраняем roomCode для использования при присоединении
       localStorage.setItem('roomCode', roomCode)
-      // roomCode будет использован при создании игры
     }
     
     if (urlGameId) {
@@ -188,39 +188,24 @@ function App() {
       setLoading(true)
       setError(null)
       
-      // Получаем group_id и room_code из URL или localStorage
+      // Получаем group_id из URL или localStorage
       const params = new URLSearchParams(window.location.search)
       const urlGroupId = params.get('group_id')
       const savedGroupId = localStorage.getItem('group_id')
       const group_id = urlGroupId || savedGroupId || null
-      
-      // Проверяем, есть ли room_code (комната уже создана через /play)
-      const startapp = params.get('startapp')
-      let room_code = null
-      if (startapp && startapp.startsWith('room-')) {
-        room_code = startapp.replace('room-', '')
-      } else {
-        room_code = localStorage.getItem('roomCode')
-      }
       
       const res = await api.post('/api/game/create', {
         mode,
         is_timed,
         user_id: user.id,
         username: user.username || user.first_name || `user_${user.id}`,
-        group_id: group_id,
-        room_code: room_code  // Передаем room_code, если комната уже создана
+        group_id: group_id
       })
       
       setGameId(res.game_id)
       setPlayerId(res.player_id)
       setGameState(res.game_state)
       localStorage.setItem('activeGameId', res.game_id)
-      
-      // Очищаем roomCode после использования
-      if (room_code) {
-        localStorage.removeItem('roomCode')
-      }
     } catch (err) {
       setError(err.message || 'Ошибка создания игры')
     } finally {
