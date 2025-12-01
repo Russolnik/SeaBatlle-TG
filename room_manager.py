@@ -218,9 +218,14 @@ class RoomManager:
     def generate_invite_link(self, room_code: str) -> str:
         """Генерирует ссылку-приглашение"""
         import os
-        bot_username = os.getenv("BOT_USERNAME", "your_bot")
-        # Используем startapp для Mini App deep links
-        return f"https://t.me/{bot_username}?startapp=room-{room_code}"
+        # Пробуем получить username бота из переменных окружения
+        bot_username = os.getenv("BOT_USERNAME", "")
+        if not bot_username:
+            # Если нет в переменных окружения, используем fallback
+            bot_username = "your_bot"
+        # Используем start для обычных ссылок (startapp работает только в Mini App)
+        # Но для кнопок в боте можно использовать и startapp
+        return f"https://t.me/{bot_username}?start=room-{room_code}"
     
     def update_room_status(self, room_code: str, status: str):
         """Обновляет статус комнаты"""

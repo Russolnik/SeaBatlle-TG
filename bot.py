@@ -1383,6 +1383,29 @@ async def cmd_play(message: Message):
         game_id = result['gameId']
         invite_link = result['inviteLink']
         
+        # Создаем игру сразу, чтобы она была доступна для присоединения
+        # Это нужно для обратной совместимости со старыми ссылками join_
+        if game_id not in games:
+            config = get_ship_config('full')  # По умолчанию full
+            game = GameState(
+                id=game_id,
+                mode='full',
+                is_timed=False,
+                time_limit=0,
+                group_id=message.chat.id if is_group else None
+            )
+            
+            p1 = Player(
+                user_id=user.id,
+                username=user.username or user.first_name or f"user_{user.id}",
+                board=create_empty_board(config['size']),
+                attacks=create_empty_attacks(config['size'])
+            )
+            
+            game.players['p1'] = p1
+            games[game_id] = game
+            logger.info(f"✅ Игра {game_id} создана вместе с комнатой {room_code}")
+        
         webapp_url = os.getenv("WEBAPP_URL", "https://seabatl.netlify.app")
         bot_info = await bot.get_me()
         
@@ -1413,11 +1436,12 @@ async def cmd_play(message: Message):
                 group_text += f"⏳ Ожидание второго игрока...\n\n"
                 group_text += f"Нажмите кнопку ниже, чтобы присоединиться!"
                 
+                # Используем новую ссылку startapp=room-XXXXXX для присоединения
                 group_keyboard = InlineKeyboardMarkup(inline_keyboard=[
                     [
                         InlineKeyboardButton(
                             text="🎮 Присоединиться к игре",
-                            url=invite_link
+                            url=invite_link  # Это уже startapp=room-XXXXXX
                         )
                     ],
                     [
@@ -1474,11 +1498,32 @@ async def cmd_start(message: Message):
     
     # Обработка присоединения к игре: /start join_<game_id> (старый формат для обратной совместимости)
     if start_param.startswith("join_"):
-        game_id = start_param.replace("join_", "")
+        game_id = start_param.replace("join_", "").upper()
         
+        # Сначала проверяем, есть ли игра
         if game_id not in games:
-            await message.answer(f"❌ Игра {game_id} не найдена или уже завершена.")
-            return
+            # Проверяем, может быть это room_code?
+            room = room_manager.get_room(game_id)
+            if room:
+                # Это комната, используем новую логику
+                logger.info(f"🔗 Обнаружена комната {game_id} через старую ссылку join_")
+                await handle_room_join(message, game_id)
+                return
+            else:
+                # Проверяем, может быть это game_id комнаты?
+                room = room_manager.get_room_by_game_id(game_id)
+                if room:
+                    logger.info(f"🔗 Обнаружена комната по game_id {game_id} через старую ссылку join_")
+                    await handle_room_join(message, room['roomCode'])
+                    return
+                else:
+                    # Игра не найдена - возможно, она еще не создана или уже удалена
+                    logger.warning(f"❌ Игра/комната {game_id} не найдена. Доступные комнаты: {list(room_manager.rooms.keys())[:5]}")
+                    await message.answer(
+                        f"❌ Игра {game_id} не найдена или уже завершена.\n\n"
+                        f"Используйте /play для создания новой игры."
+                    )
+                    return
         
         game = games[game_id]
         user = message.from_user
