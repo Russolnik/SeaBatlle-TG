@@ -5,7 +5,7 @@ export default function GameLobby({ gameId, onCreateGame, user }) {
   const [selectedMode, setSelectedMode] = useState('full')
   const [selectedTimer, setSelectedTimer] = useState(false)
   const [creating, setCreating] = useState(false)
-  const [botUsername, setBotUsername] = useState('your_bot_username')
+  const [botUsername, setBotUsername] = useState('  your_bot_username')
 
   useEffect(() => {
     // Получаем username бота из API
@@ -48,9 +48,25 @@ export default function GameLobby({ gameId, onCreateGame, user }) {
 
   // Если есть gameId - показываем ожидание
   if (gameId) {
+    // Проверяем, есть ли roomCode в URL или localStorage
+    const params = new URLSearchParams(window.location.search)
+    const startapp = params.get('startapp')
+    let roomCode = null
+    if (startapp && startapp.startsWith('room-')) {
+      roomCode = startapp.replace('room-', '')
+    } else {
+      roomCode = localStorage.getItem('roomCode')
+    }
+    
     // Ссылка должна вести в бота (убираем @ если есть)
     const cleanBotUsername = botUsername.replace('@', '')
-    const shareLink = `https://t.me/${cleanBotUsername}?start=join_${gameId}`
+    // Используем новый формат с startapp=room-XXXXXX
+    const shareLink = roomCode 
+      ? `https://t.me/${cleanBotUsername}?startapp=room-${roomCode}`
+      : `https://t.me/${cleanBotUsername}?start=join_${gameId}`
+    
+    // Сохраняем roomCode для использования в компоненте
+    const displayRoomCode = roomCode
 
     return (
       <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-blue-50 via-sky-50 to-cyan-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
@@ -59,7 +75,17 @@ export default function GameLobby({ gameId, onCreateGame, user }) {
             ⏳ Ожидание игрока
           </h1>
           <p className="text-gray-600 dark:text-gray-400 mb-6 text-center text-lg">
-            ID игры: <span className="font-mono font-bold text-blue-600 dark:text-blue-400 text-xl">{gameId}</span>
+            {displayRoomCode ? (
+              <>
+                Код комнаты: <span className="font-mono font-bold text-blue-600 dark:text-blue-400 text-xl">{displayRoomCode}</span>
+                <br />
+                <span className="text-sm text-gray-500 dark:text-gray-500">ID игры: {gameId}</span>
+              </>
+            ) : (
+              <>
+                ID игры: <span className="font-mono font-bold text-blue-600 dark:text-blue-400 text-xl">{gameId}</span>
+              </>
+            )}
           </p>
           <div className="mb-6">
             <input

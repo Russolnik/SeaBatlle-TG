@@ -26,6 +26,7 @@ from keyboards import (
     get_mode_keyboard, get_join_keyboard, get_setup_keyboard,
     get_battle_keyboard_enemy, get_battle_keyboard_my, get_game_over_keyboard
 )
+from room_manager import room_manager
 
 load_dotenv()
 
@@ -209,6 +210,7 @@ def api_create_game():
         is_timed = data.get('is_timed', False)
         user_id = data.get('user_id')
         group_id = data.get('group_id')  # Получаем group_id из запроса
+        room_code = data.get('room_code')  # Получаем room_code из запроса (если комната уже создана)
         
         if not user_id:
             return jsonify({'error': 'User ID required'}), 400
@@ -225,7 +227,31 @@ def api_create_game():
                     'game_state': serialize_game_state(game, player_id)
                 }), 200
         
-        game_id = str(uuid.uuid4())[:8]
+        # Если есть room_code, обновляем конфигурацию комнаты и используем её game_id
+        if room_code:
+            room = room_manager.get_room(room_code.upper())
+            if room and room['creator']['tgId'] == user_id:
+                # Обновляем конфигурацию комнаты
+                room['gameConfig']['mode'] = mode
+                room['gameConfig']['is_timed'] = is_timed
+                room['lastActivityAt'] = datetime.now().timestamp()
+                game_id = room['gameId']
+            else:
+                return jsonify({'error': 'Room not found or access denied'}), 404
+        else:
+            # Создаем новую комнату
+            username = data.get('username', f'user_{user_id}')
+            result = room_manager.create_room(
+                creator_tg_id=user_id,
+                creator_username=username,
+                mode=mode,
+                is_timed=is_timed,
+                source='group' if group_id else 'private',
+                chat_id=int(group_id) if group_id else None
+            )
+            room_code = result['roomCode']
+            game_id = result['gameId']
+        
         config = get_ship_config(mode)
         
         # Устанавливаем таймер в зависимости от режима
@@ -1028,6 +1054,9 @@ async def set_bot_commands():
 # Хранилище игр
 games: dict[str, GameState] = {}
 
+# Инициализация RoomManager
+room_manager.init(games)
+
 # Состояния для FSM
 class SetupState(StatesGroup):
     waiting_for_ship = State()
@@ -1299,7 +1328,7 @@ async def start_battle(game: GameState):
 
 @dp.message(Command("play"))
 async def cmd_play(message: Message):
-    """Команда /play - открыть Mini App для создания игры"""
+    """Команда /play - создать комнату и открыть Mini App"""
     # Проверяем, не участвует ли пользователь уже в активной игре
     existing = get_game_by_user(message.from_user.id)
     if existing:
@@ -1336,38 +1365,89 @@ async def cmd_play(message: Message):
             if game.id in games:
                 del games[game.id]
     
-    # Просто показываем кнопку Mini App для создания игры
-    # Игра будет создана через API после выбора режима в Mini App
-    webapp_url = os.getenv("WEBAPP_URL", "https://seabatl.netlify.app")
-    bot_info = await bot.get_me()
+    # Создаем комнату через RoomManager
+    user = message.from_user
+    is_group = message.chat.type in ['group', 'supergroup']
     
-    # Определяем group_id для передачи в Mini App
-    group_id = message.chat.id if message.chat.type != "private" else None
-    webapp_params = f"?group_id={group_id}&bot={bot_info.username}" if group_id else f"?bot={bot_info.username}"
-    
-    from aiogram.types import InlineKeyboardButton, WebAppInfo, InlineKeyboardMarkup
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(
-                text="🎮 Открыть приложение",
-                web_app=WebAppInfo(url=f"{webapp_url}{webapp_params}")
-            )
-        ]
-    ])
-    
-    text = "🎮 Создать новую игру\n\n"
-    text += "Откройте Mini App для выбора режима игры и создания новой игры!"
-    
-    await message.answer(text, reply_markup=keyboard)
-    
-    # Удаляем сообщение команды
     try:
-        await message.delete()
-    except:
-        pass
-    
-    # Приглашение в группу будет отправлено после создания игры через API
+        result = room_manager.create_room(
+            creator_tg_id=user.id,
+            creator_username=user.username or user.first_name or f"user_{user.id}",
+            mode='full',  # По умолчанию, можно будет изменить в Mini App
+            is_timed=False,
+            source='group' if is_group else 'private',
+            chat_id=message.chat.id if is_group else None
+        )
+        
+        room_code = result['roomCode']
+        game_id = result['gameId']
+        invite_link = result['inviteLink']
+        
+        webapp_url = os.getenv("WEBAPP_URL", "https://seabatl.netlify.app")
+        bot_info = await bot.get_me()
+        
+        from aiogram.types import InlineKeyboardButton, WebAppInfo, InlineKeyboardMarkup
+        
+        # Кнопка для открытия Mini App с roomCode
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🎮 Открыть приложение",
+                    web_app=WebAppInfo(url=f"{webapp_url}?startapp=room-{room_code}&bot={bot_info.username}")
+                )
+            ]
+        ])
+        
+        text = "🎮 Комната создана!\n\n"
+        text += f"🆔 Код комнаты: <code>{room_code}</code>\n\n"
+        text += "Откройте Mini App для выбора режима игры!"
+        
+        await message.answer(text, reply_markup=keyboard, parse_mode='HTML')
+        
+        # Если это группа, отправляем приглашение в группу
+        if is_group:
+            try:
+                group_text = f"🎮 Новая игра «Морской бой»!\n\n"
+                group_text += f"👤 Создатель: @{user.username or user.first_name}\n"
+                group_text += f"🆔 Код комнаты: <code>{room_code}</code>\n\n"
+                group_text += f"⏳ Ожидание второго игрока...\n\n"
+                group_text += f"Нажмите кнопку ниже, чтобы присоединиться!"
+                
+                group_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="🎮 Присоединиться к игре",
+                            url=invite_link
+                        )
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            text="🎮 Открыть приложение",
+                            web_app=WebAppInfo(url=f"{webapp_url}?startapp=room-{room_code}&bot={bot_info.username}")
+                        )
+                    ]
+                ])
+                
+                group_msg = await bot.send_message(
+                    chat_id=message.chat.id,
+                    text=group_text,
+                    reply_markup=group_keyboard,
+                    parse_mode='HTML'
+                )
+                room_manager.add_group_message(room_code, group_msg.message_id)
+                logger.info(f"✅ Приглашение отправлено в группу {message.chat.id} для комнаты {room_code}")
+            except Exception as e:
+                logger.error(f"❌ Ошибка отправки приглашения в группу: {e}", exc_info=True)
+        
+        # Удаляем сообщение команды
+        try:
+            await message.delete()
+        except:
+            pass
+            
+    except Exception as e:
+        logger.error(f"Ошибка создания комнаты: {e}", exc_info=True)
+        await message.answer("❌ Не удалось создать комнату. Попробуйте ещё раз.")
 
 
 @dp.message(Command("start"))
@@ -1385,7 +1465,14 @@ async def cmd_start(message: Message):
     
     start_param = args[0]
     
-    # Обработка присоединения к игре: /start join_<game_id>
+    # Обработка deep link для комнаты: startapp=room-XXXXXX
+    if start_param.startswith("room-"):
+        room_code = start_param.replace("room-", "").upper()
+        logger.info(f"🔗 Обработка deep link для комнаты {room_code} от пользователя {message.from_user.id}")
+        await handle_room_join(message, room_code)
+        return
+    
+    # Обработка присоединения к игре: /start join_<game_id> (старый формат для обратной совместимости)
     if start_param.startswith("join_"):
         game_id = start_param.replace("join_", "")
         
@@ -1492,6 +1579,160 @@ async def cmd_start(message: Message):
         )
     else:
         await message.answer("👋 Добро пожаловать! Используйте /play для создания игры.")
+
+
+async def handle_room_join(message: Message, room_code: str):
+    """Обработка присоединения к комнате через deep link"""
+    try:
+        user = message.from_user
+        logger.info(f"🔗 Обработка присоединения к комнате {room_code} от пользователя {user.id}")
+        
+        # Присоединяемся к комнате
+        room_data = room_manager.join_room(room_code, user.id, user.username or user.first_name or f"user_{user.id}")
+        
+        if not room_data:
+            await message.answer(f"❌ Комната {room_code} не найдена или уже заполнена.")
+            return
+        
+        # Если игра еще не создана, создаем её
+        game_id = room_data['gameId']
+        if game_id not in games:
+            # Создаем игру на основе конфигурации комнаты
+            config = get_ship_config(room_data['gameConfig']['mode'])
+            game_config = room_data['gameConfig']
+            
+            # Устанавливаем таймер в зависимости от режима
+            time_limit = 0
+            if game_config['is_timed']:
+                if game_config['mode'] == 'fast':
+                    time_limit = 60
+                elif game_config['mode'] == 'classic':
+                    time_limit = 120
+                else:  # full
+                    time_limit = 180
+            
+            game = GameState(
+                id=game_id,
+                mode=game_config['mode'],
+                is_timed=game_config['is_timed'],
+                time_limit=time_limit,
+                group_id=room_manager.get_room(room_code).get('chatId') if room_manager.get_room(room_code) else None
+            )
+            
+            # Создаем первого игрока (создатель комнаты)
+            room = room_manager.get_room(room_code)
+            if room:
+                p1 = Player(
+                    user_id=room['creator']['tgId'],
+                    username=room['creator']['username'],
+                    board=create_empty_board(config['size']),
+                    attacks=create_empty_attacks(config['size'])
+                )
+                game.players['p1'] = p1
+                games[game_id] = game
+        
+        game = games[game_id]
+        
+        # Проверяем, не присоединился ли уже пользователь
+        for pid, player in game.players.items():
+            if player and player.user_id == user.id:
+                # Пользователь уже в игре
+                webapp_url = os.getenv("WEBAPP_URL", "https://seabatl.netlify.app")
+                bot_info = await bot.get_me()
+                from aiogram.types import InlineKeyboardButton, WebAppInfo, InlineKeyboardMarkup
+                
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="🎮 Открыть приложение",
+                            web_app=WebAppInfo(url=f"{webapp_url}?startapp=room-{room_code}&bot={bot_info.username}")
+                        )
+                    ]
+                ])
+                
+                await message.answer(
+                    f"✅ Вы уже участвуете в игре!\n\n"
+                    f"🆔 Код комнаты: <code>{room_code}</code>\n\n"
+                    f"Откройте Mini App для продолжения игры.",
+                    reply_markup=keyboard,
+                    parse_mode='HTML'
+                )
+                return
+        
+        # Добавляем второго игрока в игру
+        if not game.players['p2']:
+            config = get_ship_config(game.mode)
+            p2 = Player(
+                user_id=user.id,
+                username=user.username or user.first_name or f"user_{user.id}",
+                board=create_empty_board(config['size']),
+                attacks=create_empty_attacks(config['size'])
+            )
+            game.players['p2'] = p2
+            logger.info(f"✅ Игрок {p2.username} ({p2.user_id}) добавлен в игру {game_id}")
+        
+        # Отправляем уведомление в группу, если игра была создана там
+        if game.group_id:
+            try:
+                room = room_manager.get_room(room_code)
+                if room:
+                    group_notification = f"✅ @{user.username or user.first_name} присоединился к игре!\n\n"
+                    group_notification += f"🎮 Игроки:\n"
+                    group_notification += f"1️⃣ @{game.players['p1'].username}\n"
+                    group_notification += f"2️⃣ @{user.username or user.first_name}\n\n"
+                    group_notification += f"🆔 Код комнаты: <code>{room_code}</code>\n"
+                    group_notification += f"Игра начинается! Откройте Mini App для расстановки кораблей."
+                    
+                    webapp_url = os.getenv("WEBAPP_URL", "https://seabatl.netlify.app")
+                    bot_info = await bot.get_me()
+                    from aiogram.types import InlineKeyboardButton, WebAppInfo, InlineKeyboardMarkup
+                    
+                    group_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                        [
+                            InlineKeyboardButton(
+                                text="🎮 Открыть приложение",
+                                web_app=WebAppInfo(url=f"{webapp_url}?startapp=room-{room_code}&bot={bot_info.username}")
+                            )
+                        ]
+                    ])
+                    
+                    group_msg = await bot.send_message(
+                        chat_id=game.group_id,
+                        text=group_notification,
+                        reply_markup=group_keyboard,
+                        parse_mode='HTML'
+                    )
+                    room_manager.add_group_message(room_code, group_msg.message_id)
+                    logger.info(f"✅ Уведомление о присоединении отправлено в группу {game.group_id}")
+            except Exception as e:
+                logger.error(f"Ошибка отправки уведомления в группу: {e}", exc_info=True)
+        
+        # Отправляем сообщение присоединившемуся игроку
+        webapp_url = os.getenv("WEBAPP_URL", "https://seabatl.netlify.app")
+        bot_info = await bot.get_me()
+        from aiogram.types import InlineKeyboardButton, WebAppInfo, InlineKeyboardMarkup
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🎮 Открыть приложение",
+                    web_app=WebAppInfo(url=f"{webapp_url}?startapp=room-{room_code}&bot={bot_info.username}")
+                )
+            ]
+        ])
+        
+        await message.answer(
+            f"✅ Вы присоединились к игре!\n\n"
+            f"🆔 Код комнаты: <code>{room_code}</code>\n"
+            f"👤 Создатель: @{room_data['creator']['username']}\n\n"
+            f"Откройте Mini App для расстановки кораблей и начала игры!",
+            reply_markup=keyboard,
+            parse_mode='HTML'
+        )
+        
+    except Exception as e:
+        logger.error(f"Ошибка присоединения к комнате: {e}", exc_info=True)
+        await message.answer("❌ Произошла ошибка при присоединении к комнате. Попробуйте ещё раз.")
 
 
 @dp.message(Command("stop"))
