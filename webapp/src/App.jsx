@@ -127,6 +127,15 @@ function App() {
       setLoading(true)
       setError(null)
       
+      // Проверяем, есть ли roomCode в URL (для присоединения через ссылку)
+      const params = new URLSearchParams(window.location.search)
+      const startapp = params.get('startapp')
+      let roomCode = null
+      if (startapp && startapp.startsWith('room-')) {
+        roomCode = startapp.replace('room-', '')
+        localStorage.setItem('roomCode', roomCode)
+      }
+      
       // Пытаемся получить состояние игры
       const state = await api.get(`/api/game/${gameId}/state?player_id=p1`)
       
@@ -206,6 +215,11 @@ function App() {
       setPlayerId(res.player_id)
       setGameState(res.game_state)
       localStorage.setItem('activeGameId', res.game_id)
+      
+      // Сохраняем room_code для отображения ссылки
+      if (res.room_code) {
+        localStorage.setItem('roomCode', res.room_code)
+      }
     } catch (err) {
       setError(err.message || 'Ошибка создания игры')
     } finally {
@@ -243,9 +257,14 @@ function App() {
     )
   }
 
-  // Если нет игры - показываем лобби
+  // Если нет игры - показываем лобби (создание игры)
   if (!gameState) {
     return <GameLobby gameId={gameId} onCreateGame={createGame} user={user} />
+  }
+
+  // Если игра в лобби (ожидание второго игрока или готовность)
+  if (gameState.phase === 'lobby') {
+    return <GameLobby gameId={gameId} gameState={gameState} playerId={playerId} onCreateGame={createGame} user={user} onStateUpdate={setGameState} socket={socket} />
   }
 
   // Если игра в расстановке
@@ -272,7 +291,7 @@ function App() {
     )
   }
 
-  // Лобби
+  // Лобби (fallback)
   return <GameLobby gameId={gameId} onCreateGame={createGame} user={user} />
 }
 

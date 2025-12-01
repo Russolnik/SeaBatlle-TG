@@ -352,7 +352,8 @@ def api_create_game():
         return jsonify({
             'game_id': game_id,
             'player_id': 'p1',
-            'game_state': serialize_game_state(game, 'p1')
+            'game_state': serialize_game_state(game, 'p1'),
+            'room_code': room_code  # Возвращаем room_code для отображения ссылки
         }), 200
     except Exception as e:
         logger.error(f"Ошибка создания игры: {e}", exc_info=True)
@@ -807,40 +808,16 @@ def api_ready(game_id):
         if not player:
             return jsonify({'error': 'Player not found'}), 400
         
-        # Проверяем, все ли корабли размещены
-        config = get_ship_config(game.mode)
-        required_ships_list = config['ships']
-        required_ships_dict = {}
-        for size in required_ships_list:
-            required_ships_dict[size] = required_ships_dict.get(size, 0) + 1
+        # Переключаем готовность игрока
+        player.ready = not player.ready
         
-        placed_ships = {}
-        for ship in player.ships:
-            if ship and ship.get('size'):
-                placed_ships[ship['size']] = placed_ships.get(ship['size'], 0) + 1
+        logger.info(f"Игрок {player_id} изменил готовность: {player.ready}")
         
-        # Проверяем, что размещено нужное количество кораблей каждого размера
-        all_placed = True
-        missing_ships = []
-        for size, count in required_ships_dict.items():
-            placed = placed_ships.get(size, 0)
-            if placed < count:
-                all_placed = False
-                missing_ships.append(f"{count - placed}×{size}")
-        
-        if not all_placed:
-            error_msg = f'Не все корабли размещены! Осталось разместить: {", ".join(missing_ships)}'
-            logger.warning(f"Игрок {player_id} попытался начать игру без всех кораблей: {error_msg}")
-            return jsonify({'error': error_msg}), 400
-        
-        player.ready = True
-        
-        # Если оба игрока готовы, начинаем бой
+        # Если оба игрока готовы, переходим в фазу расстановки (setup)
+        # Бой начнется только после расстановки всех кораблей
         if game.players['p1'] and game.players['p1'].ready and \
            game.players['p2'] and game.players['p2'].ready:
-            game.current_player = 'p1' if (datetime.now().timestamp() % 2 == 0) else 'p2'
-            if game.is_timed:
-                game.last_move_time = datetime.now().timestamp()
+            logger.info(f"Оба игрока готовы! Игра {game_id} переходит в фазу расстановки кораблей.")
         
         # Уведомляем через WebSocket
         socketio.emit('game_state', serialize_game_state(game, 'p1'), room=f'game_{game_id}')
@@ -898,12 +875,40 @@ def serialize_game_state(game: GameState, player_id: str) -> dict:
     config = get_ship_config(game.mode)
     
     # Определяем фазу игры
-    phase = 'lobby'
+    phase = 'lobby'  # По умолчанию - лобби (ожидание или готовность)
+    
+    # Если есть оба игрока
     if game.players['p1'] and game.players['p2']:
+        # Если оба готовы
         if player and player.ready and opponent and opponent.ready:
-            phase = 'battle'
+            # Проверяем, все ли корабли расставлены
+            config = get_ship_config(game.mode)
+            required_ships_list = config['ships']
+            required_ships_dict = {}
+            for size in required_ships_list:
+                required_ships_dict[size] = required_ships_dict.get(size, 0) + 1
+            
+            placed_ships = {}
+            if player and player.ships:
+                for ship in player.ships:
+                    if ship and ship.get('size'):
+                        placed_ships[ship['size']] = placed_ships.get(ship['size'], 0) + 1
+            
+            # Проверяем, все ли корабли размещены
+            all_ships_placed = True
+            for size, count in required_ships_dict.items():
+                placed = placed_ships.get(size, 0)
+                if placed < count:
+                    all_ships_placed = False
+                    break
+            
+            if all_ships_placed:
+                phase = 'battle'  # Все готово - начинаем бой
+            else:
+                phase = 'setup'  # Готовы, но нужно расставить корабли
         else:
-            phase = 'setup'
+            # Есть оба игрока, но не оба готовы - показываем экран готовности (lobby)
+            phase = 'lobby'
     
     # Корабли для размещения (для фазы setup)
     ships_to_place = []
@@ -1421,23 +1426,71 @@ async def cmd_start(message: Message):
             # Проверяем, может быть это room_code?
             room = room_manager.get_room(game_id)
             if room:
-                # Это комната, используем новую логику
+                # Это комната, открываем Mini App
                 logger.info(f"🔗 Обнаружена комната {game_id} через старую ссылку join_")
-                await handle_room_join(message, game_id)
+                webapp_url = os.getenv("WEBAPP_URL", "https://seabatl.netlify.app")
+                bot_info = await bot.get_me()
+                from aiogram.types import InlineKeyboardButton, WebAppInfo, InlineKeyboardMarkup
+                
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="🎮 Открыть приложение",
+                            web_app=WebAppInfo(url=f"{webapp_url}?startapp=room-{game_id}&bot={bot_info.username}")
+                        )
+                    ]
+                ])
+                
+                await message.answer(
+                    f"✅ Найдена комната {game_id}!\n\n"
+                    f"Откройте Mini App для присоединения к игре.",
+                    reply_markup=keyboard
+                )
                 return
             else:
                 # Проверяем, может быть это game_id комнаты?
                 room = room_manager.get_room_by_game_id(game_id)
                 if room:
                     logger.info(f"🔗 Обнаружена комната по game_id {game_id} через старую ссылку join_")
-                    await handle_room_join(message, room['roomCode'])
+                    webapp_url = os.getenv("WEBAPP_URL", "https://seabatl.netlify.app")
+                    bot_info = await bot.get_me()
+                    from aiogram.types import InlineKeyboardButton, WebAppInfo, InlineKeyboardMarkup
+                    
+                    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                        [
+                            InlineKeyboardButton(
+                                text="🎮 Открыть приложение",
+                                web_app=WebAppInfo(url=f"{webapp_url}?startapp=room-{room['roomCode']}&bot={bot_info.username}")
+                            )
+                        ]
+                    ])
+                    
+                    await message.answer(
+                        f"✅ Найдена игра {game_id}!\n\n"
+                        f"Откройте Mini App для присоединения к игре.",
+                        reply_markup=keyboard
+                    )
                     return
                 else:
-                    # Игра не найдена - возможно, она еще не создана или уже удалена
-                    logger.warning(f"❌ Игра/комната {game_id} не найдена. Доступные комнаты: {list(room_manager.rooms.keys())[:5]}")
+                    # Игра не найдена - открываем Mini App для создания новой
+                    logger.warning(f"❌ Игра/комната {game_id} не найдена. Открываем Mini App для создания новой игры.")
+                    webapp_url = os.getenv("WEBAPP_URL", "https://seabatl.netlify.app")
+                    bot_info = await bot.get_me()
+                    from aiogram.types import InlineKeyboardButton, WebAppInfo, InlineKeyboardMarkup
+                    
+                    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                        [
+                            InlineKeyboardButton(
+                                text="🎮 Открыть приложение",
+                                web_app=WebAppInfo(url=f"{webapp_url}?bot={bot_info.username}")
+                            )
+                        ]
+                    ])
+                    
                     await message.answer(
                         f"❌ Игра {game_id} не найдена или уже завершена.\n\n"
-                        f"Используйте /play для создания новой игры."
+                        f"Откройте Mini App для создания новой игры.",
+                        reply_markup=keyboard
                     )
                     return
         
@@ -1668,7 +1721,7 @@ async def handle_room_join(message: Message, room_code: str):
             except Exception as e:
                 logger.error(f"Ошибка отправки уведомления в группу: {e}", exc_info=True)
         
-        # Отправляем сообщение присоединившемуся игроку
+        # Отправляем сообщение присоединившемуся игроку с кнопкой Mini App
         webapp_url = os.getenv("WEBAPP_URL", "https://seabatl.netlify.app")
         bot_info = await bot.get_me()
         from aiogram.types import InlineKeyboardButton, WebAppInfo, InlineKeyboardMarkup
@@ -1677,7 +1730,7 @@ async def handle_room_join(message: Message, room_code: str):
             [
                 InlineKeyboardButton(
                     text="🎮 Открыть приложение",
-                    web_app=WebAppInfo(url=f"{webapp_url}?startapp=room-{room_code}&bot={bot_info.username}")
+                    web_app=WebAppInfo(url=f"{webapp_url}?startapp=room-{room_code}&gameId={game_id}&bot={bot_info.username}")
                 )
             ]
         ])
@@ -1686,7 +1739,7 @@ async def handle_room_join(message: Message, room_code: str):
             f"✅ Вы присоединились к игре!\n\n"
             f"🆔 Код комнаты: <code>{room_code}</code>\n"
             f"👤 Создатель: @{room_data['creator']['username']}\n\n"
-            f"Откройте Mini App для расстановки кораблей и начала игры!",
+            f"Откройте Mini App для подтверждения готовности!",
             reply_markup=keyboard,
             parse_mode='HTML'
         )

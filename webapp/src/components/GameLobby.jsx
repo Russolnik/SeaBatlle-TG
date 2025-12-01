@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react'
 import { api } from '../utils/api'
 
-export default function GameLobby({ gameId, onCreateGame, user }) {
+export default function GameLobby({ gameId, gameState, playerId, onCreateGame, user, onStateUpdate, socket }) {
   const [selectedMode, setSelectedMode] = useState('full')
   const [selectedTimer, setSelectedTimer] = useState(false)
   const [creating, setCreating] = useState(false)
+  const [ready, setReady] = useState(false)
+  const [settingReady, setSettingReady] = useState(false)
   const [botUsername, setBotUsername] = useState('  your_bot_username')
 
   useEffect(() => {
@@ -46,7 +48,89 @@ export default function GameLobby({ gameId, onCreateGame, user }) {
     }
   }
 
-  // Если есть gameId - показываем ожидание
+  // Если есть gameState и оба игрока - показываем экран готовности
+  if (gameState && gameState.players) {
+    const myPlayer = gameState.players[playerId]
+    const opponentId = playerId === 'p1' ? 'p2' : 'p1'
+    const opponent = gameState.players[opponentId]
+    
+    // Если есть оба игрока
+    if (myPlayer && opponent && opponent.user_id) {
+      const isMyReady = myPlayer.ready || false
+      const isOpponentReady = opponent.ready || false
+      
+      const handleReady = async () => {
+        if (settingReady) return
+        setSettingReady(true)
+        try {
+          const res = await api.post(`/api/game/${gameId}/ready`, {
+            player_id: playerId
+          })
+          if (res.game_state && onStateUpdate) {
+            onStateUpdate(res.game_state)
+          }
+          setReady(!isMyReady)
+        } catch (err) {
+          console.error('Ошибка:', err)
+          alert(err.message || 'Ошибка')
+        } finally {
+          setSettingReady(false)
+        }
+      }
+      
+      return (
+        <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-blue-50 via-sky-50 to-cyan-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
+          <div className="bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm rounded-2xl shadow-2xl p-8 max-w-md w-full border-4 border-blue-300 dark:border-blue-700">
+            <h1 className="text-4xl font-bold mb-6 text-center text-gray-800 dark:text-gray-200 drop-shadow-lg">
+              ⚓ Готовность к игре
+            </h1>
+            
+            <div className="mb-6 space-y-4">
+              <div className="bg-blue-50 dark:bg-blue-900/30 rounded-xl p-4 border-2 border-blue-200 dark:border-blue-700">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-bold text-gray-800 dark:text-gray-200">Вы:</span>
+                  <span className={`text-2xl ${isMyReady ? 'text-green-500' : 'text-gray-400'}`}>
+                    {isMyReady ? '✅ Готов' : '⏳ Не готов'}
+                  </span>
+                </div>
+              </div>
+              
+              <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4 border-2 border-gray-200 dark:border-gray-600">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-bold text-gray-800 dark:text-gray-200">
+                    {opponent.username || 'Противник'}:
+                  </span>
+                  <span className={`text-2xl ${isOpponentReady ? 'text-green-500' : 'text-gray-400'}`}>
+                    {isOpponentReady ? '✅ Готов' : '⏳ Не готов'}
+                  </span>
+                </div>
+              </div>
+            </div>
+            
+            <button
+              onClick={handleReady}
+              disabled={settingReady}
+              className={`w-full px-6 py-4 rounded-xl mb-4 shadow-xl font-bold text-lg transition-all hover:scale-105 active:scale-95 ${
+                isMyReady
+                  ? 'bg-red-500 hover:bg-red-600 text-white'
+                  : 'bg-green-500 hover:bg-green-600 text-white'
+              } disabled:opacity-50`}
+            >
+              {settingReady ? '⏳' : isMyReady ? '❌ Не готов' : '✅ Готов'}
+            </button>
+            
+            {isMyReady && isOpponentReady && (
+              <div className="text-center text-green-600 dark:text-green-400 font-bold text-lg">
+                🎮 Оба игрока готовы! Начинается расстановка кораблей...
+              </div>
+            )}
+          </div>
+        </div>
+      )
+    }
+  }
+  
+  // Если есть gameId, но нет второго игрока - показываем ожидание и ссылку
   if (gameId) {
     // Проверяем, есть ли roomCode в URL или localStorage
     const params = new URLSearchParams(window.location.search)
