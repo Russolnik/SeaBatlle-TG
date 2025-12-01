@@ -1370,6 +1370,8 @@ async def cmd_play(message: Message):
     is_group = message.chat.type in ['group', 'supergroup']
     
     try:
+        logger.info(f"Попытка создания комнаты для пользователя {user.id} (@{user.username or user.first_name})")
+        
         result = room_manager.create_room(
             creator_tg_id=user.id,
             creator_username=user.username or user.first_name or f"user_{user.id}",
@@ -1382,6 +1384,12 @@ async def cmd_play(message: Message):
         room_code = result['roomCode']
         game_id = result['gameId']
         invite_link = result['inviteLink']
+        
+        # Обновляем invite_link с правильным username бота
+        bot_info = await bot.get_me()
+        if bot_info.username:
+            invite_link = f"https://t.me/{bot_info.username}?start=room-{room_code}"
+            logger.info(f"Обновлена ссылка-приглашение с username бота: {invite_link}")
         
         # Создаем игру сразу, чтобы она была доступна для присоединения
         # Это нужно для обратной совместимости со старыми ссылками join_
@@ -1471,7 +1479,13 @@ async def cmd_play(message: Message):
             
     except Exception as e:
         logger.error(f"Ошибка создания комнаты: {e}", exc_info=True)
-        await message.answer("❌ Не удалось создать комнату. Попробуйте ещё раз.")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        await message.answer(
+            f"❌ Не удалось создать комнату.\n\n"
+            f"Ошибка: {str(e)}\n\n"
+            f"Попробуйте ещё раз или обратитесь к администратору."
+        )
 
 
 @dp.message(Command("start"))

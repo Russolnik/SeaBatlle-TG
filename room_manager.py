@@ -23,7 +23,7 @@ class RoomManager:
     def init(self, game_manager):
         """Инициализация с game_manager"""
         self.game_manager = game_manager
-        logger.info("✅ RoomManager инициализирован")
+        logger.info(f"✅ RoomManager инициализирован с game_manager типа {type(game_manager)}")
     
     def create_room(self, creator_tg_id: int, creator_username: str, 
                     mode: str = 'full', is_timed: bool = False,
@@ -42,11 +42,17 @@ class RoomManager:
         Returns:
             { roomCode, inviteLink, gameId }
         """
-        if not self.game_manager:
+        # Проверяем, что game_manager инициализирован
+        # game_manager может быть словарем (games) или объектом
+        if self.game_manager is None:
+            logger.error("RoomManager не инициализирован!")
             raise ValueError('RoomManager не инициализирован. Вызовите init(game_manager)')
+        
+        logger.info(f"Создание комнаты для пользователя {creator_tg_id} (@{creator_username})")
         
         # Генерируем уникальный код комнаты
         room_code = self.generate_room_code()
+        logger.info(f"Сгенерирован код комнаты: {room_code}")
         
         # Создаем игру через game_manager
         # game_manager должен иметь метод create_game или мы создадим игру напрямую
@@ -74,16 +80,22 @@ class RoomManager:
             'groupMessages': []  # ID сообщений в группе для удаления
         }
         
-        self.rooms[room_code] = room
-        self.room_by_game_id[game_id] = room_code
-        
-        logger.info(f"✅ Создана комната {room_code} для игрока {creator_username} ({creator_tg_id})")
-        
-        return {
-            'roomCode': room_code,
-            'gameId': game_id,
-            'inviteLink': self.generate_invite_link(room_code)
-        }
+        try:
+            self.rooms[room_code] = room
+            self.room_by_game_id[game_id] = room_code
+            
+            invite_link = self.generate_invite_link(room_code)
+            
+            logger.info(f"✅ Создана комната {room_code} для игрока {creator_username} ({creator_tg_id}), invite_link: {invite_link}")
+            
+            return {
+                'roomCode': room_code,
+                'gameId': game_id,
+                'inviteLink': invite_link
+            }
+        except Exception as e:
+            logger.error(f"Ошибка при сохранении комнаты {room_code}: {e}", exc_info=True)
+            raise
     
     def join_room(self, room_code: str, player_tg_id: int, player_username: str) -> Optional[Dict[str, Any]]:
         """
@@ -221,11 +233,20 @@ class RoomManager:
         # Пробуем получить username бота из переменных окружения
         bot_username = os.getenv("BOT_USERNAME", "")
         if not bot_username:
-            # Если нет в переменных окружения, используем fallback
-            bot_username = "your_bot"
+            # Если нет в переменных окружения, пробуем получить из токена
+            # или используем fallback
+            bot_token = os.getenv("BOT_TOKEN", "")
+            if bot_token:
+                # Можно попробовать получить username через API, но это асинхронно
+                # Пока используем fallback
+                logger.warning("BOT_USERNAME не установлен, используем fallback")
+            bot_username = "your_bot"  # Fallback - будет заменено в bot.py
+        
         # Используем start для обычных ссылок (startapp работает только в Mini App)
         # Но для кнопок в боте можно использовать и startapp
-        return f"https://t.me/{bot_username}?start=room-{room_code}"
+        link = f"https://t.me/{bot_username}?start=room-{room_code}"
+        logger.debug(f"Сгенерирована ссылка-приглашение: {link}")
+        return link
     
     def update_room_status(self, room_code: str, status: str):
         """Обновляет статус комнаты"""
