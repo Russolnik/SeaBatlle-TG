@@ -9,6 +9,31 @@ export default function GameLobby({ gameId, gameState, playerId, onCreateGame, u
   const [settingReady, setSettingReady] = useState(false)
   const [botUsername, setBotUsername] = useState('  your_bot_username')
 
+  // Слушаем WebSocket обновления для синхронизации состояния
+  useEffect(() => {
+    if (!socket || !gameId) return
+
+    const handleGameState = (state) => {
+      if (state && state.id === gameId && onStateUpdate) {
+        console.log('GameLobby: получено обновление game_state через WebSocket', { 
+          gameId: state.id, 
+          phase: state.phase,
+          players: state.players ? {
+            p1: { ready: state.players.p1?.ready, user_id: state.players.p1?.user_id },
+            p2: { ready: state.players.p2?.ready, user_id: state.players.p2?.user_id }
+          } : null
+        })
+        onStateUpdate(state)
+      }
+    }
+
+    socket.on('game_state', handleGameState)
+
+    return () => {
+      socket.off('game_state', handleGameState)
+    }
+  }, [socket, gameId, onStateUpdate])
+
   useEffect(() => {
     // Получаем username бота из API
     const fetchBotInfo = async () => {

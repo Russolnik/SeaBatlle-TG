@@ -101,6 +101,8 @@ function App() {
 
     const handleGameState = (state) => {
       if (state && state.id) {
+        console.log('WebSocket: получено обновление game_state', { gameId: state.id, phase: state.phase, player_id: state.player_id })
+        
         // Сохраняем позицию скролла перед обновлением
         const scrollY = window.scrollY
         
@@ -109,7 +111,7 @@ function App() {
         setGameId(state.id)
         localStorage.setItem('activeGameId', state.id)
         
-        // Обновляем playerId если он изменился
+        // Обновляем playerId если он изменился или если его еще нет
         if (state.player_id) {
           setPlayerId(state.player_id)
         }

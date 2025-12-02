@@ -232,8 +232,6 @@ def api_create_game():
         return jsonify({}), 200
     
     try:
-    """Создать новую игру"""
-    try:
         data = request.json
         mode = data.get('mode', 'full')  # По умолчанию full (10×10)
         is_timed = data.get('is_timed', False)
@@ -626,9 +624,12 @@ def api_join_game(game_id):
             except Exception as e:
                 logger.error(f"Ошибка отправки уведомления в группу (API): {e}", exc_info=True)
         
-        # Уведомляем через WebSocket
-        socketio.emit('game_state', serialize_game_state(game, 'p1'), room=f'game_{game_id}')
-        socketio.emit('game_state', serialize_game_state(game, 'p2'), room=f'game_{game_id}')
+        # Уведомляем через WebSocket обоих игроков
+        state_p1 = serialize_game_state(game, 'p1')
+        state_p2 = serialize_game_state(game, 'p2')
+        logger.info(f"API join: отправка game_state через WebSocket для игры {game_id}, phase: p1={state_p1.get('phase')}, p2={state_p2.get('phase')}")
+        socketio.emit('game_state', state_p1, room=f'game_{game_id}')
+        socketio.emit('game_state', state_p2, room=f'game_{game_id}')
         
         return jsonify({
             'player_id': 'p2',
@@ -981,9 +982,12 @@ def api_ready(game_id):
            game.players['p2'] and game.players['p2'].ready:
             logger.info(f"Оба игрока готовы! Игра {game_id} переходит в фазу расстановки кораблей.")
         
-        # Уведомляем через WebSocket
-        socketio.emit('game_state', serialize_game_state(game, 'p1'), room=f'game_{game_id}')
-        socketio.emit('game_state', serialize_game_state(game, 'p2'), room=f'game_{game_id}')
+        # Уведомляем через WebSocket обоих игроков
+        state_p1 = serialize_game_state(game, 'p1')
+        state_p2 = serialize_game_state(game, 'p2')
+        logger.info(f"API ready: отправка game_state через WebSocket для игры {game_id}, player_id={player_id}, phase: p1={state_p1.get('phase')}, p2={state_p2.get('phase')}, p1.ready={game.players['p1'].ready if game.players['p1'] else None}, p2.ready={game.players['p2'].ready if game.players['p2'] else None}")
+        socketio.emit('game_state', state_p1, room=f'game_{game_id}')
+        socketio.emit('game_state', state_p2, room=f'game_{game_id}')
         
         return jsonify({
             'game_state': serialize_game_state(game, player_id)
@@ -1041,33 +1045,56 @@ def serialize_game_state(game: GameState, player_id: str) -> dict:
     
     # Если есть оба игрока
     if game.players['p1'] and game.players['p2']:
-        # Если оба готовы
-        if player and player.ready and opponent and opponent.ready:
-            # Проверяем, все ли корабли расставлены
+        p1 = game.players['p1']
+        p2 = game.players['p2']
+        # Если оба готовы (проверяем готовность обоих игроков)
+        if p1 and p1.ready and p2 and p2.ready:
+            # Проверяем, все ли корабли расставлены у обоих игроков
             config = get_ship_config(game.mode)
             required_ships_list = config['ships']
             required_ships_dict = {}
             for size in required_ships_list:
                 required_ships_dict[size] = required_ships_dict.get(size, 0) + 1
             
-            placed_ships = {}
+            # Проверяем корабли для текущего игрока
+            placed_ships_player = {}
             if player and player.ships:
                 for ship in player.ships:
                     if ship and ship.get('size'):
-                        placed_ships[ship['size']] = placed_ships.get(ship['size'], 0) + 1
+                        placed_ships_player[ship['size']] = placed_ships_player.get(ship['size'], 0) + 1
             
-            # Проверяем, все ли корабли размещены
-            all_ships_placed = True
+            # Проверяем, все ли корабли размещены у текущего игрока
+            all_ships_placed_player = True
             for size, count in required_ships_dict.items():
-                placed = placed_ships.get(size, 0)
+                placed = placed_ships_player.get(size, 0)
                 if placed < count:
-                    all_ships_placed = False
+                    all_ships_placed_player = False
                     break
             
-            if all_ships_placed:
-                phase = 'battle'  # Все готово - начинаем бой
-            else:
+            # Проверяем корабли для обоих игроков
+            placed_ships_opponent = {}
+            if opponent and opponent.ships:
+                for ship in opponent.ships:
+                    if ship and ship.get('size'):
+                        placed_ships_opponent[ship['size']] = placed_ships_opponent.get(ship['size'], 0) + 1
+            
+            # Проверяем, все ли корабли размещены у противника
+            all_ships_placed_opponent = True
+            for size, count in required_ships_dict.items():
+                placed = placed_ships_opponent.get(size, 0)
+                if placed < count:
+                    all_ships_placed_opponent = False
+                    break
+            
+            # Если корабли не расставлены у текущего игрока - фаза setup
+            if not all_ships_placed_player:
                 phase = 'setup'  # Готовы, но нужно расставить корабли
+            elif all_ships_placed_player and all_ships_placed_opponent:
+                # Оба игрока расставили корабли - начинаем бой
+                phase = 'battle'
+            else:
+                # Текущий игрок расставил, но противник еще нет - остаемся в setup
+                phase = 'setup'
         else:
             # Есть оба игрока, но не оба готовы - показываем экран готовности (lobby)
             phase = 'lobby'
