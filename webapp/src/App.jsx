@@ -283,6 +283,11 @@ function App() {
   }
 
   const createGame = async (mode, is_timed = false) => {
+    if (!user || !user.id) {
+      setError('Пользователь не авторизован')
+      return
+    }
+    
     try {
       setLoading(true)
       setError(null)
@@ -348,7 +353,7 @@ function App() {
   }
 
   // Если нет игры - показываем лобби (создание игры)
-  if (!gameState) {
+  if (!gameState || !gameState.id) {
     return <GameLobby gameId={gameId} onCreateGame={createGame} user={user} />
   }
 

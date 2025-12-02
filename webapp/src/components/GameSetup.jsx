@@ -8,7 +8,7 @@ export default function GameSetup({ gameState, playerId, onStateUpdate, socket }
   const [autoPlaced, setAutoPlaced] = useState(false)
   const [horizontal, setHorizontal] = useState(true)
 
-  if (!gameState || !playerId || !gameState.players) {
+  if (!gameState || !gameState.id || !playerId || !gameState.players) {
     return <div className="flex items-center justify-center min-h-screen">Загрузка...</div>
   }
 

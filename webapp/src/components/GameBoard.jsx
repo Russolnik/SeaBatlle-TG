@@ -25,7 +25,7 @@ export default function GameBoard({ gameState, playerId, onStateUpdate, socket }
     }
   }, [gameState])
 
-  if (!gameState || !playerId || !gameState.players) {
+  if (!gameState || !gameState.id || !playerId || !gameState.players) {
     return <div className="flex items-center justify-center min-h-screen">Загрузка...</div>
   }
 
