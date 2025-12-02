@@ -31,12 +31,16 @@ export function useTelegramAuth() {
                 setAuthToken(response.token)
                 console.log('Авторизация успешна')
               } else {
-                throw new Error('Токен не получен от сервера')
+                console.warn('Токен не получен от сервера, используем данные пользователя из Telegram')
+                // Используем данные пользователя из Telegram даже без токена
+                setUser(tgUser)
+                setAuthToken('temp_token')
               }
             } catch (authError) {
               console.error('Ошибка авторизации на сервере:', authError)
-              // При ошибке авторизации используем данные пользователя из Telegram
-              // для возможности работы в режиме разработки
+              // При ошибке авторизации (например, "Failed to fetch") используем данные пользователя из Telegram
+              // для возможности работы приложения
+              console.warn('Используем данные пользователя из Telegram без токена сервера')
               setUser(tgUser)
               setAuthToken('temp_token')
             }
