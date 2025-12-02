@@ -52,9 +52,26 @@ function App() {
   useEffect(() => {
     if (authLoading || !user) return
     
-    // Если нет gameId - проверяем активную игру пользователя
+    // Если нет gameId - проверяем roomCode или активную игру пользователя
     if (!gameId) {
-      loadActiveGame()
+      // Проверяем, есть ли roomCode в URL или localStorage
+      const params = new URLSearchParams(window.location.search)
+      const startapp = params.get('startapp')
+      let roomCode = null
+      if (startapp && startapp.startsWith('room-')) {
+        roomCode = startapp.replace('room-', '')
+        localStorage.setItem('roomCode', roomCode)
+      } else {
+        roomCode = localStorage.getItem('roomCode')
+      }
+      
+      if (roomCode) {
+        // Если есть roomCode, получаем gameId из комнаты
+        loadGameByRoomCode(roomCode)
+      } else {
+        // Иначе проверяем активную игру пользователя
+        loadActiveGame()
+      }
     } else {
       loadGame()
     }
@@ -92,6 +109,69 @@ function App() {
       socket.off('game_state', handleGameState)
     }
   }, [socket, connected, gameId])
+
+  const loadGameByRoomCode = async (roomCode) => {
+    if (!user || !roomCode) return
+    
+    try {
+      setLoading(true)
+      setError(null)
+      
+      // Получаем информацию о комнате
+      const roomInfo = await api.get(`/api/room/${roomCode}/info`)
+      
+      if (roomInfo.game_id) {
+        // Игра уже создана, загружаем её напрямую
+        const gameId = roomInfo.game_id
+        setGameId(gameId)
+        localStorage.setItem('activeGameId', gameId)
+        
+        // Загружаем состояние игры
+        try {
+          const state = await api.get(`/api/game/${gameId}/state?player_id=p1`)
+          
+          // Проверяем, в игре ли пользователь
+          const p1 = state.players?.p1
+          const p2 = state.players?.p2
+          const isInGame = (p1?.user_id === user.id) || (p2?.user_id === user.id)
+          
+          if (!isInGame && (!p2 || !p2.user_id)) {
+            // Присоединяемся к игре, если есть место
+            try {
+              const joinRes = await api.post(`/api/game/${gameId}/join`, {
+                user_id: user.id,
+                username: user.username || user.first_name || `user_${user.id}`
+              })
+              setPlayerId(joinRes.player_id)
+              setGameState(joinRes.game_state)
+            } catch (joinErr) {
+              // Если не удалось присоединиться, просто загружаем состояние
+              setGameState(state)
+              if (p1?.user_id === user.id) setPlayerId('p1')
+              else if (p2?.user_id === user.id) setPlayerId('p2')
+            }
+          } else {
+            setGameState(state)
+            if (p1?.user_id === user.id) setPlayerId('p1')
+            else if (p2?.user_id === user.id) setPlayerId('p2')
+          }
+        } catch (err) {
+          console.error('Ошибка загрузки состояния игры:', err)
+          setError(err.message || 'Ошибка загрузки игры')
+        }
+      } else {
+        // Игра еще не создана, показываем экран ожидания
+        // Сохраняем roomCode для использования при создании игры
+        localStorage.setItem('roomCode', roomCode)
+      }
+    } catch (err) {
+      console.error('Ошибка загрузки игры по roomCode:', err)
+      // Если комната не найдена, проверяем активную игру
+      loadActiveGame()
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const loadActiveGame = async () => {
     if (!user) return

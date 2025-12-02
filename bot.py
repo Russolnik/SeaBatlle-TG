@@ -227,58 +227,147 @@ def api_create_game():
                     'game_state': serialize_game_state(game, player_id)
                 }), 200
         
-        # Создаем новую комнату при создании игры
         username = data.get('username', f'user_{user_id}')
-        result = room_manager.create_room(
-            creator_tg_id=user_id,
-            creator_username=username,
-            mode=mode,
-            is_timed=is_timed,
-            source='group' if group_id else 'private',
-            chat_id=int(group_id) if group_id else None
-        )
-        room_code = result['roomCode']
-        game_id = result['gameId']
-        invite_link = result['inviteLink']
         
-        config = get_ship_config(mode)
+        # Если передан room_code - используем существующую комнату
+        if room_code:
+            normalized_room_code = str(room_code).upper().strip()
+            existing_room = room_manager.get_room(normalized_room_code)
+            
+            if not existing_room:
+                logger.warning(f"Комната {normalized_room_code} не найдена при попытке создания игры")
+                return jsonify({'error': f'Room {normalized_room_code} not found'}), 404
+            
+            # Обновляем конфигурацию комнаты
+            existing_room['gameConfig']['mode'] = mode
+            existing_room['gameConfig']['is_timed'] = is_timed
+            existing_room['lastActivityAt'] = datetime.now().timestamp()
+            
+            room_code = normalized_room_code
+            game_id = existing_room['gameId']
+            
+            # Проверяем, существует ли уже игра
+            if game_id in games:
+                # Игра уже существует, обновляем её конфигурацию
+                game = games[game_id]
+                game.mode = mode
+                game.is_timed = is_timed
+                # Обновляем time_limit
+                time_limit = 0
+                if is_timed:
+                    if mode == 'fast':
+                        time_limit = 60
+                    elif mode == 'classic':
+                        time_limit = 120
+                    else:  # full
+                        time_limit = 180
+                game.time_limit = time_limit
+                
+                logger.info(f"API: Обновлена существующая игра {game_id} через комнату {room_code} (mode={mode}, timed={is_timed})")
+            else:
+                # Игры нет, но комната есть - создаем игру
+                config = get_ship_config(mode)
+                time_limit = 0
+                if is_timed:
+                    if mode == 'fast':
+                        time_limit = 60
+                    elif mode == 'classic':
+                        time_limit = 120
+                    else:  # full
+                        time_limit = 180
+                
+                if group_id:
+                    try:
+                        group_id = int(group_id)
+                    except (ValueError, TypeError):
+                        group_id = None
+                
+                game = GameState(
+                    id=game_id,
+                    mode=mode,
+                    is_timed=is_timed,
+                    time_limit=time_limit,
+                    group_id=group_id
+                )
+                
+                p1 = Player(
+                    user_id=user_id,
+                    username=username,
+                    board=create_empty_board(config['size']),
+                    attacks=create_empty_attacks(config['size'])
+                )
+                
+                game.players['p1'] = p1
+                games[game_id] = game
+                logger.info(f"API: Создана игра {game_id} для существующей комнаты {room_code} (mode={mode}, timed={is_timed})")
+            
+            # Генерируем invite_link (будет обновлен при отправке в группу)
+            invite_link = f"https://t.me/your_bot_username?start=room-{room_code}"
+        else:
+            # Создаем новую комнату при создании игры
+            result = room_manager.create_room(
+                creator_tg_id=user_id,
+                creator_username=username,
+                mode=mode,
+                is_timed=is_timed,
+                source='group' if group_id else 'private',
+                chat_id=int(group_id) if group_id else None
+            )
+            room_code = result['roomCode']
+            game_id = result['gameId']
+            invite_link = result['inviteLink']
+            
+            config = get_ship_config(mode)
+            
+            # Устанавливаем таймер в зависимости от режима
+            time_limit = 0
+            if is_timed:
+                if mode == 'fast':
+                    time_limit = 60  # 1 минута на ход для быстрого режима
+                elif mode == 'classic':
+                    time_limit = 120  # 2 минуты на ход для обычного режима
+                else:  # full
+                    time_limit = 180  # 3 минуты на ход для полного режима
+            
+            # Преобразуем group_id в int, если он передан как строка
+            if group_id:
+                try:
+                    group_id = int(group_id)
+                except (ValueError, TypeError):
+                    group_id = None
+            
+            game = GameState(
+                id=game_id,
+                mode=mode,
+                is_timed=is_timed,
+                time_limit=time_limit,
+                group_id=group_id
+            )
+            
+            # Создаем первого игрока
+            p1 = Player(
+                user_id=user_id,
+                username=username,
+                board=create_empty_board(config['size']),
+                attacks=create_empty_attacks(config['size'])
+            )
+            
+            game.players['p1'] = p1
+            games[game_id] = game
+            logger.info(f"API: Игра {game_id} создана через Mini App (mode={mode}, timed={is_timed}, group_id={group_id}). Активных игр: {len(games)}")
         
-        # Устанавливаем таймер в зависимости от режима
-        time_limit = 0
-        if is_timed:
-            if mode == 'fast':
-                time_limit = 60  # 1 минута на ход для быстрого режима
-            elif mode == 'classic':
-                time_limit = 120  # 2 минуты на ход для обычного режима
-            else:  # full
-                time_limit = 180  # 3 минуты на ход для полного режима
-        
-        # Преобразуем group_id в int, если он передан как строка
-        if group_id:
-            try:
-                group_id = int(group_id)
-            except (ValueError, TypeError):
-                group_id = None
-        
-        game = GameState(
-            id=game_id,
-            mode=mode,
-            is_timed=is_timed,
-            time_limit=time_limit,
-            group_id=group_id
-        )
-        
-        # Создаем первого игрока
-        p1 = Player(
-            user_id=user_id,
-            username=data.get('username', f'user_{user_id}'),
-            board=create_empty_board(config['size']),
-            attacks=create_empty_attacks(config['size'])
-        )
-        
-        game.players['p1'] = p1
-        games[game_id] = game
-        logger.info(f"API: Игра {game_id} создана через Mini App (mode={mode}, timed={is_timed}, group_id={group_id}). Активных игр: {len(games)}")
+        # Получаем p1 для отправки сообщения в группу
+        p1 = game.players.get('p1')
+        if not p1:
+            # Если p1 не найден (не должно происходить), создаем его
+            config = get_ship_config(mode)
+            p1 = Player(
+                user_id=user_id,
+                username=username,
+                board=create_empty_board(config['size']),
+                attacks=create_empty_attacks(config['size'])
+            )
+            game.players['p1'] = p1
         
         # Отправляем приглашение в группу, если игра создана в группе
         if group_id:
@@ -357,6 +446,40 @@ def api_create_game():
         }), 200
     except Exception as e:
         logger.error(f"Ошибка создания игры: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/room/<room_code>/info', methods=['GET', 'OPTIONS'])
+def api_get_room_info(room_code):
+    """Получить информацию о комнате по коду"""
+    if request.method == 'OPTIONS':
+        return jsonify({}), 200
+    
+    try:
+        normalized_code = str(room_code).upper().strip()
+        room = room_manager.get_room(normalized_code)
+        
+        if not room:
+            return jsonify({'error': 'Room not found'}), 404
+        
+        game_id = room.get('gameId')
+        if not game_id or game_id not in games:
+            # Комната существует, но игра еще не создана
+            return jsonify({
+                'room_code': normalized_code,
+                'game_id': None,
+                'status': 'waiting',
+                'game_config': room.get('gameConfig', {})
+            }), 200
+        
+        game = games[game_id]
+        return jsonify({
+            'room_code': normalized_code,
+            'game_id': game_id,
+            'status': 'ready',
+            'game_config': room.get('gameConfig', {})
+        }), 200
+    except Exception as e:
+        logger.error(f"Ошибка получения информации о комнате: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/game/<game_id>/state', methods=['GET', 'OPTIONS'])
