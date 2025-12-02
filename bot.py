@@ -1782,7 +1782,7 @@ async def handle_room_join(message: Message, room_code: str):
                     [
                         InlineKeyboardButton(
                             text="🎮 Открыть приложение",
-                            web_app=WebAppInfo(url=f"{webapp_url}?startapp=room-{room_code}&bot={bot_info.username}")
+                            web_app=WebAppInfo(url=f"{webapp_url}?startapp=room-{room_code}&gameId={game_id}&bot={bot_info.username}")
                         )
                     ]
                 ])
@@ -1828,7 +1828,7 @@ async def handle_room_join(message: Message, room_code: str):
                         [
                             InlineKeyboardButton(
                                 text="🎮 Открыть приложение",
-                                web_app=WebAppInfo(url=f"{webapp_url}?startapp=room-{room_code}&bot={bot_info.username}")
+                                web_app=WebAppInfo(url=f"{webapp_url}?startapp=room-{room_code}&gameId={game_id}&bot={bot_info.username}")
                             )
                         ]
                     ])

@@ -144,9 +144,9 @@ export default function GameLobby({ gameId, gameState, playerId, onCreateGame, u
     
     // Ссылка должна вести в бота (убираем @ если есть)
     const cleanBotUsername = botUsername.replace('@', '')
-    // Используем новый формат с startapp=room-XXXXXX
+    // Используем формат start=room-XXXXXX для обычных ссылок (startapp работает только в кнопках WebApp)
     const shareLink = roomCode 
-      ? `https://t.me/${cleanBotUsername}?startapp=room-${roomCode}`
+      ? `https://t.me/${cleanBotUsername}?start=room-${roomCode}`
       : `https://t.me/${cleanBotUsername}?start=join_${gameId}`
     
     // Сохраняем roomCode для использования в компоненте
