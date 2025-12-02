@@ -130,8 +130,9 @@ export default function GameLobby({ gameId, gameState, playerId, onCreateGame, u
     }
   }
   
-  // Если есть gameId, но нет второго игрока - показываем ожидание и ссылку
-  if (gameId) {
+  // Если есть gameId и gameState - показываем ожидание или готовность
+  // Если есть gameId, но нет gameState - это значит игра еще не создана, показываем экран создания
+  if (gameId && gameState) {
     // Проверяем, есть ли roomCode в URL или localStorage
     const params = new URLSearchParams(window.location.search)
     const startapp = params.get('startapp')

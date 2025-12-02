@@ -24,6 +24,11 @@ function App() {
     
     // Обработка startapp=room-XXXXXX (для присоединения к игре)
     const startapp = params.get('startapp')
+    
+    // Если есть параметры в URL (gameId, startapp, group_id) - используем их
+    // Если параметров нет - это новое открытие через /play, очищаем старые данные
+    const hasUrlParams = urlGameId || startapp || urlGroupId
+    
     if (startapp && startapp.startsWith('room-')) {
       const roomCode = startapp.replace('room-', '')
       // Сохраняем roomCode для использования при присоединении
@@ -34,12 +39,17 @@ function App() {
       setGameId(urlGameId)
       // Сохраняем в localStorage
       localStorage.setItem('activeGameId', urlGameId)
-    } else {
-      // Проверяем localStorage
+    } else if (hasUrlParams) {
+      // Если есть другие параметры (startapp, group_id), но нет gameId - проверяем localStorage
       const savedGameId = localStorage.getItem('activeGameId')
       if (savedGameId) {
         setGameId(savedGameId)
       }
+    } else {
+      // Если нет параметров в URL - это новое открытие через /play
+      // Очищаем старый gameId, чтобы показать экран создания игры
+      localStorage.removeItem('activeGameId')
+      localStorage.removeItem('roomCode')
     }
     
     // Сохраняем group_id в localStorage для использования при создании игры
