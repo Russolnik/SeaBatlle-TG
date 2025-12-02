@@ -3,7 +3,7 @@ import { io } from 'socket.io-client'
 
 const WS_URL = import.meta.env.VITE_WS_URL || 
                import.meta.env.VITE_BACKEND_URL || 
-               'https://seabatlle-tg.onrender.com'
+               'https://seabatlle-tg-ut9r.onrender.com'
 
 const httpToWs = (url) => {
   if (url.startsWith('ws://') || url.startsWith('wss://')) return url

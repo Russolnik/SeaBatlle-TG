@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Optional, Literal
 from threading import Thread
 
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, make_response
 from flask_socketio import SocketIO, emit, disconnect
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, BotCommand
@@ -45,7 +45,7 @@ app = Flask(__name__)
 
 # Настройка CORS - разрешаем запросы с фронтенда
 # Получаем URL бэкенда из переменных окружения
-BACKEND_URL = os.getenv("BACKEND_URL", "https://seabatlle-tg.onrender.com")
+BACKEND_URL = os.getenv("BACKEND_URL", "https://seabatlle-tg-ut9r.onrender.com")
 
 # Собираем список разрешенных origins
 allowed_origins_list = [
@@ -90,6 +90,30 @@ def is_origin_allowed(origin):
 
 # Настройка CORS - используем только ручную обработку, чтобы избежать дублирования заголовков
 # Flask-CORS отключен для API endpoints, используем только after_request
+
+# Глобальный обработчик для всех OPTIONS запросов (preflight)
+@app.before_request
+def handle_preflight():
+    """Обрабатываем preflight запросы (OPTIONS) для CORS"""
+    if request.method == 'OPTIONS':
+        # Создаем ответ с заголовками CORS
+        response = make_response()
+        origin = request.headers.get('Origin', '')
+        
+        if is_origin_allowed(origin) or not origin:
+            response.headers['Access-Control-Allow-Origin'] = origin if origin else '*'
+            response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH'
+            response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With'
+            response.headers['Access-Control-Allow-Credentials'] = 'true'
+            response.headers['Access-Control-Max-Age'] = '3600'
+        else:
+            # Даже если origin не разрешен, добавляем заголовки для отладки
+            response.headers['Access-Control-Allow-Origin'] = origin
+            response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH'
+            response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With'
+            response.headers['Access-Control-Allow-Credentials'] = 'true'
+        
+        return response
 
 # Добавляем обработчик для добавления CORS заголовков вручную
 @app.after_request
@@ -201,8 +225,13 @@ def api_auth():
         logger.error(f"Ошибка авторизации: {e}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/game/create', methods=['POST'])
+@app.route('/api/game/create', methods=['POST', 'OPTIONS'])
 def api_create_game():
+    """Создать новую игру"""
+    if request.method == 'OPTIONS':
+        return jsonify({}), 200
+    
+    try:
     """Создать новую игру"""
     try:
         data = request.json
@@ -848,8 +877,13 @@ def api_auto_place(game_id):
         logger.error(f"Ошибка авто-расстановки: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/bot/info', methods=['GET'])
+@app.route('/api/bot/info', methods=['GET', 'OPTIONS'])
 def api_bot_info():
+    """Получить информацию о боте"""
+    if request.method == 'OPTIONS':
+        return jsonify({}), 200
+    
+    try:
     """Получить информацию о боте"""
     try:
         # Используем кэш если есть
@@ -885,8 +919,13 @@ def api_bot_info():
             'first_name': 'Bot'
         }), 200
 
-@app.route('/api/user/active-game', methods=['GET'])
+@app.route('/api/user/active-game', methods=['GET', 'OPTIONS'])
 def api_get_active_game():
+    """Получить активную игру пользователя"""
+    if request.method == 'OPTIONS':
+        return jsonify({}), 200
+    
+    try:
     """Получить активную игру пользователя"""
     try:
         user_id = request.args.get('user_id')

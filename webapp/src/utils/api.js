@@ -1,6 +1,6 @@
 const API_URL = import.meta.env.VITE_API_URL || 
                 import.meta.env.VITE_BACKEND_URL || 
-                'https://seabatlle-tg.onrender.com'
+                'https://seabatlle-tg-ut9r.onrender.com'
 
 console.log('API URL:', API_URL)
 
