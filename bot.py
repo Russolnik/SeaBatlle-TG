@@ -775,11 +775,36 @@ def api_place_ship(game_id):
         if all_placed:
             player.ready = True
             
-            # Если оба игрока готовы, начинаем бой
+            # Если оба игрока готовы, проверяем, все ли корабли расставлены у обоих
             if game.players['p1'] and game.players['p1'].ready and \
                game.players['p2'] and game.players['p2'].ready:
-                game.current_player = 'p1'
-                game.phase = 'battle'
+                # Проверяем корабли для обоих игроков
+                p1_placed = {}
+                if game.players['p1'].ships:
+                    for ship in game.players['p1'].ships:
+                        if ship and ship.get('size'):
+                            p1_placed[ship['size']] = p1_placed.get(ship['size'], 0) + 1
+                
+                p2_placed = {}
+                if game.players['p2'].ships:
+                    for ship in game.players['p2'].ships:
+                        if ship and ship.get('size'):
+                            p2_placed[ship['size']] = p2_placed.get(ship['size'], 0) + 1
+                
+                p1_all_placed = all(
+                    p1_placed.get(size, 0) >= count
+                    for size, count in required_ships_dict.items()
+                )
+                p2_all_placed = all(
+                    p2_placed.get(size, 0) >= count
+                    for size, count in required_ships_dict.items()
+                )
+                
+                # Если оба игрока расставили все корабли - начинаем бой
+                if p1_all_placed and p2_all_placed:
+                    game.current_player = 'p1'  # Первый ход у p1
+                    game.phase = 'battle'
+                    logger.info(f"Оба игрока расставили корабли! Игра {game_id} начинается! Первый ход: {game.current_player}")
         
         # Уведомляем через WebSocket обоих игроков
         state_p1 = serialize_game_state(game, 'p1')

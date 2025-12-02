@@ -8,10 +8,38 @@ export default function GameBoard({ gameState, playerId, onStateUpdate, socket }
   const [attacking, setAttacking] = useState(false)
   const containerRef = useRef(null)
 
+  // Слушаем WebSocket обновления для синхронизации состояния
+  useEffect(() => {
+    if (!socket || !gameState?.id) return
+
+    const handleGameState = (state) => {
+      if (state && state.id === gameState.id && onStateUpdate) {
+        console.log('GameBoard: получено обновление game_state через WebSocket', { 
+          gameId: state.id, 
+          phase: state.phase,
+          current_player: state.current_player,
+          player_id: state.player_id
+        })
+        onStateUpdate(state)
+      }
+    }
+
+    socket.on('game_state', handleGameState)
+
+    return () => {
+      socket.off('game_state', handleGameState)
+    }
+  }, [socket, gameState?.id, onStateUpdate])
+
   useEffect(() => {
     if (gameState && playerId) {
       const isTurn = gameState.current_player === playerId
       setIsMyTurn(isTurn)
+      console.log('GameBoard: обновление isMyTurn', { 
+        current_player: gameState.current_player, 
+        playerId, 
+        isMyTurn: isTurn 
+      })
     }
   }, [gameState?.current_player, playerId])
 
