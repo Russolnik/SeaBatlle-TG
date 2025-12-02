@@ -283,8 +283,13 @@ function App() {
   }
 
   const createGame = async (mode, is_timed = false) => {
+    // Проверяем авторизацию только если она завершена
+    if (authLoading) {
+      return // Авторизация еще не завершена, ждем
+    }
+    
     if (!user || !user.id) {
-      setError('Пользователь не авторизован')
+      setError('Пользователь не авторизован. Пожалуйста, перезагрузите приложение.')
       return
     }
     
