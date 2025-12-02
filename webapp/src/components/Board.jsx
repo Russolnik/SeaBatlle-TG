@@ -31,8 +31,8 @@ export default function Board({ board, size = 10, interactive = false, showShips
   }
 
   const getCellState = (row, col) => {
-    if (!normalizedBoard || !normalizedBoard[row] || !normalizedBoard[row][col]) return 'empty'
-    const cell = normalizedBoard[row][col]
+    if (!board || !board[row] || !board[row][col]) return 'empty'
+    const cell = board[row][col]
     
     if (cell === '🟥' || cell === 'ship') return 'ship'
     if (cell === '🔥' || cell === 'hit') return 'hit'
@@ -83,7 +83,7 @@ export default function Board({ board, size = 10, interactive = false, showShips
   }
 
   // Если доска не нормализована, показываем пустую
-  if (!normalizedBoard || !Array.isArray(normalizedBoard) || normalizedBoard.length === 0) {
+  if (!board || !Array.isArray(board) || board.length === 0) {
     return (
       <div className="inline-block p-4 bg-gradient-to-br from-sky-100 via-blue-50 to-cyan-50 dark:from-gray-800 dark:via-gray-800 dark:to-gray-900 rounded-2xl shadow-2xl border-4 border-blue-300 dark:border-blue-700">
         <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${actualSize}, minmax(0, 1fr))` }}>

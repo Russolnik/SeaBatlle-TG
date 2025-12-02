@@ -101,7 +101,28 @@ function App() {
 
     const handleGameState = (state) => {
       if (state && state.id) {
-        console.log('WebSocket: получено обновление game_state', { gameId: state.id, phase: state.phase, player_id: state.player_id })
+        console.log('WebSocket: получено обновление game_state', { gameId: state.id, phase: state.phase, player_id: state.player_id, currentPlayerId: playerId })
+        
+        // Проверяем, что это состояние для текущего игрока
+        // Если player_id не совпадает, но это та же игра - обновляем состояние (общая информация одинаковая)
+        // Но предпочитаем использовать состояние с правильным player_id
+        if (state.player_id && playerId && state.player_id !== playerId) {
+          // Это состояние для другого игрока, но общая информация (готовность, phase) должна быть одинаковой
+          // Обновляем состояние, но сохраняем текущий playerId
+          if (state.id === gameId) {
+            console.log('WebSocket: получено состояние для другого игрока, обновляем общую информацию', { 
+              receivedPlayerId: state.player_id, 
+              currentPlayerId: playerId,
+              phase: state.phase 
+            })
+            const scrollY = window.scrollY
+            setGameState(state)
+            requestAnimationFrame(() => {
+              window.scrollTo(0, scrollY)
+            })
+          }
+          return
+        }
         
         // Сохраняем позицию скролла перед обновлением
         const scrollY = window.scrollY
@@ -401,8 +422,9 @@ function App() {
     )
   }
 
-  // Лобби (fallback)
-  return <GameLobby gameId={gameId} onCreateGame={createGame} user={user} />
+  // Fallback: если phase не определен или неизвестен, показываем лобби
+  console.warn('Неизвестная фаза игры:', gameState.phase, 'показываем лобби')
+  return <GameLobby gameId={gameId} gameState={gameState} playerId={playerId} onCreateGame={createGame} user={user} onStateUpdate={setGameState} socket={socket} />
 }
 
 export default App

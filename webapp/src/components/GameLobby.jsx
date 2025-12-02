@@ -84,6 +84,14 @@ export default function GameLobby({ gameId, gameState, playerId, onCreateGame, u
       const isMyReady = myPlayer.ready || false
       const isOpponentReady = opponent.ready || false
       
+      console.log('GameLobby: состояние готовности', {
+        playerId,
+        myReady: isMyReady,
+        opponentReady: isOpponentReady,
+        myPlayer: { ready: myPlayer.ready, user_id: myPlayer.user_id },
+        opponent: { ready: opponent.ready, user_id: opponent.user_id }
+      })
+      
       const handleReady = async () => {
         if (settingReady) return
         setSettingReady(true)

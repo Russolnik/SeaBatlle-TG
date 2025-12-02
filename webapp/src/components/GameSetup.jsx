@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Board from './Board'
 import { api } from '../utils/api'
 
@@ -7,6 +7,28 @@ export default function GameSetup({ gameState, playerId, onStateUpdate, socket }
   const [placing, setPlacing] = useState(false)
   const [autoPlaced, setAutoPlaced] = useState(false)
   const [horizontal, setHorizontal] = useState(true)
+
+  // Слушаем WebSocket обновления для синхронизации состояния
+  useEffect(() => {
+    if (!socket || !gameState?.id) return
+
+    const handleGameState = (state) => {
+      if (state && state.id === gameState.id && onStateUpdate) {
+        console.log('GameSetup: получено обновление game_state через WebSocket', { 
+          gameId: state.id, 
+          phase: state.phase,
+          player_id: state.player_id
+        })
+        onStateUpdate(state)
+      }
+    }
+
+    socket.on('game_state', handleGameState)
+
+    return () => {
+      socket.off('game_state', handleGameState)
+    }
+  }, [socket, gameState?.id, onStateUpdate])
 
   if (!gameState || !gameState.id || !playerId || !gameState.players) {
     return <div className="flex items-center justify-center min-h-screen">Загрузка...</div>
