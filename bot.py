@@ -885,8 +885,6 @@ def api_bot_info():
         return jsonify({}), 200
     
     try:
-    """Получить информацию о боте"""
-    try:
         # Используем кэш если есть
         global _bot_info_cache
         if _bot_info_cache is None:
@@ -926,8 +924,6 @@ def api_get_active_game():
     if request.method == 'OPTIONS':
         return jsonify({}), 200
     
-    try:
-    """Получить активную игру пользователя"""
     try:
         user_id = request.args.get('user_id')
         if not user_id:
