@@ -992,6 +992,36 @@ def api_get_active_game():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/user/clear-active', methods=['POST', 'OPTIONS'])
+def api_clear_active_game():
+    """Удалить активную игру пользователя (очистка застрявшей игры)"""
+    if request.method == 'OPTIONS':
+        return jsonify({}), 200
+    try:
+        data = request.json or {}
+        user_id = data.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'user_id required'}), 400
+        try:
+            user_id = int(user_id)
+        except (ValueError, TypeError):
+            return jsonify({'error': 'invalid user_id'}), 400
+
+        existing = get_game_by_user(user_id)
+        if not existing:
+            return jsonify({'status': 'no_game'}), 200
+
+        game_id, game, player_id = existing
+        room_manager.delete_room_by_game(game_id)
+        games.pop(game_id, None)
+        socketio.emit('game_deleted', {'game_id': game_id}, room=f'game_{game_id}')
+        logger.info(f"Очищена активная игра {game_id} по запросу пользователя {user_id}")
+        return jsonify({'status': 'deleted', 'game_id': game_id}), 200
+    except Exception as e:
+        logger.error(f"Ошибка очистки активной игры: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/share/link', methods=['POST', 'OPTIONS'])
 def api_share_link():
     """Отправить пользователю ссылку на игру от имени бота"""
@@ -2227,6 +2257,22 @@ async def cmd_stop(message: Message):
             await bot.send_message(chat_id=p2.user_id, text=cancel_text)
         except:
             pass
+
+
+@dp.message(Command("clear"))
+async def cmd_clear(message: Message):
+    """Очистить активную игру (если застряла)"""
+    user_id = message.from_user.id
+    existing = get_game_by_user(user_id)
+    if not existing:
+        await message.answer("✅ У вас нет активной игры.")
+        return
+
+    game_id, game, player_id = existing
+    room_manager.delete_room_by_game(game_id)
+    games.pop(game_id, None)
+    socketio.emit('game_deleted', {'game_id': game_id}, room=f'game_{game_id}')
+    await message.answer("🗑 Игра очищена. Можете создать новую через /play.")
     
     # Удаляем все сообщения бота в группе (если игра была в группе)
     if game.group_id and game.group_messages:

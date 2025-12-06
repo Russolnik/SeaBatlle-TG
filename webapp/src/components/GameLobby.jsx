@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { api } from '../utils/api'
 
-export default function GameLobby({ gameId, gameState, playerId, onCreateGame, user, onStateUpdate, socket, onLeaveGame, onDeleteGame, isCreator }) {
+export default function GameLobby({ gameId, gameState, playerId, onCreateGame, user, onStateUpdate, socket, onLeaveGame, onDeleteGame, onClearGame, isCreator }) {
   const [selectedMode, setSelectedMode] = useState('full')
   const [selectedTimer, setSelectedTimer] = useState(false)
   const [creating, setCreating] = useState(false)
@@ -368,6 +368,12 @@ export default function GameLobby({ gameId, gameState, playerId, onCreateGame, u
             className="px-3 py-1 text-sm bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-all"
           >
             ➕ Подключиться по коду
+          </button>
+          <button
+            onClick={onClearGame}
+            className="px-3 py-1 text-sm bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
+          >
+            🗑 Очистить игру
           </button>
         </div>
         <h1 className="text-5xl font-bold mb-8 text-center text-gray-800 dark:text-gray-200 drop-shadow-lg">

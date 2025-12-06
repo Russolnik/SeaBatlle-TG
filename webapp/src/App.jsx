@@ -369,6 +369,20 @@ function App() {
     setPlayerId(null)
   }
 
+  const clearActiveGame = async () => {
+    if (!user) return
+    try {
+      setLoading(true)
+      await api.post('/api/user/clear-active', { user_id: user.id })
+      clearLocalGame()
+    } catch (err) {
+      console.error('Ошибка очистки активной игры:', err)
+      setError(err.message || 'Ошибка очистки игры')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const leaveGame = async () => {
     if (!gameId || !user) return
     try {
@@ -429,13 +443,13 @@ function App() {
 
   // Если нет игры - показываем лобби (создание игры)
   if (!gameState || !gameState.id) {
-    return <GameLobby gameId={gameId} onCreateGame={createGame} user={user} onLeaveGame={leaveGame} onDeleteGame={deleteGame} isCreator={false} />
+    return <GameLobby gameId={gameId} onCreateGame={createGame} user={user} onLeaveGame={leaveGame} onDeleteGame={deleteGame} onClearGame={clearActiveGame} isCreator={false} />
   }
 
   // Если игра в лобби (ожидание второго игрока или готовность)
   if (gameState.phase === 'lobby') {
     const isCreator = playerId === 'p1' && gameState.players?.p1?.user_id === user?.id
-    return <GameLobby gameId={gameId} gameState={gameState} playerId={playerId} onCreateGame={createGame} user={user} onStateUpdate={setGameState} socket={socket} onLeaveGame={leaveGame} onDeleteGame={deleteGame} isCreator={isCreator} />
+    return <GameLobby gameId={gameId} gameState={gameState} playerId={playerId} onCreateGame={createGame} user={user} onStateUpdate={setGameState} socket={socket} onLeaveGame={leaveGame} onDeleteGame={deleteGame} onClearGame={clearActiveGame} isCreator={isCreator} />
   }
 
   // Если игра в расстановке
@@ -450,6 +464,7 @@ function App() {
         socket={socket}
         onLeaveGame={leaveGame}
         onDeleteGame={deleteGame}
+        onClearGame={clearActiveGame}
         isCreator={isCreator}
       />
     )
@@ -467,6 +482,7 @@ function App() {
         socket={socket}
         onLeaveGame={leaveGame}
         onDeleteGame={deleteGame}
+        onClearGame={clearActiveGame}
         isCreator={isCreator}
       />
     )

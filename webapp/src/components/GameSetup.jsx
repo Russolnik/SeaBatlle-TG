@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import Board from './Board'
 import { api } from '../utils/api'
 
-export default function GameSetup({ gameState, playerId, user, onStateUpdate, socket, onLeaveGame, onDeleteGame, isCreator }) {
+export default function GameSetup({ gameState, playerId, user, onStateUpdate, socket, onLeaveGame, onDeleteGame, onClearGame, isCreator }) {
   const [placingShip, setPlacingShip] = useState(null)
   const [placing, setPlacing] = useState(false)
   const [autoPlaced, setAutoPlaced] = useState(false)
@@ -199,6 +199,12 @@ export default function GameSetup({ gameState, playerId, user, onStateUpdate, so
               🗑 Удалить
             </button>
           )}
+            <button
+              onClick={onClearGame}
+              className="px-3 py-2 text-sm bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-all"
+            >
+              🧹 Очистить игру
+            </button>
           </div>
         </div>
         <h1 className="text-4xl font-bold mb-6 text-center text-gray-800 dark:text-gray-200 drop-shadow-lg">

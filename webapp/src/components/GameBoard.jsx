@@ -3,7 +3,7 @@ import Board from './Board'
 import GameInfo from './GameInfo'
 import { api } from '../utils/api'
 
-export default function GameBoard({ gameState, playerId, user, onStateUpdate, socket, onLeaveGame, onDeleteGame, isCreator }) {
+export default function GameBoard({ gameState, playerId, user, onStateUpdate, socket, onLeaveGame, onDeleteGame, onClearGame, isCreator }) {
   const [isMyTurn, setIsMyTurn] = useState(false)
   const [attacking, setAttacking] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -171,6 +171,12 @@ export default function GameBoard({ gameState, playerId, user, onStateUpdate, so
                 🗑 Удалить
               </button>
             )}
+            <button
+              onClick={onClearGame}
+              className="px-3 py-2 text-sm bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-all"
+            >
+              🧹 Очистить игру
+            </button>
           </div>
         </div>
         <GameInfo gameState={gameState} playerId={playerId} isMyTurn={isMyTurn} />
