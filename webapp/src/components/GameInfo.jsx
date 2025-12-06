@@ -39,13 +39,22 @@ export default function GameInfo({ gameState, playerId, isMyTurn }) {
         </div>
       )}
       
-      {opponent && (
+      {myPlayer?.ships && myPlayer.ships.length > 0 && (
         <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
-          <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">Корабли противника:</div>
+          <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">Подбитые корабли:</div>
           <div className="flex flex-wrap gap-1">
-            <span className="px-2 py-1 rounded text-xs font-semibold bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
-              Осталось: {opponent.ships_remaining ?? 0}
-            </span>
+            {myPlayer.ships.map((ship, idx) => (
+              <span
+                key={idx}
+                className={`px-2 py-1 rounded text-xs font-semibold ${
+                  ship.destroyed
+                    ? 'bg-red-500 text-white'
+                    : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+                }`}
+              >
+                {ship.size}×1 {ship.destroyed ? '💥' : '✅'}
+              </span>
+            ))}
           </div>
         </div>
       )}

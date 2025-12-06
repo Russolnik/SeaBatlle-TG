@@ -237,7 +237,7 @@ def api_create_game():
     
     try:
         data = request.json
-        mode = 'full'  # Оставляем только режим 10×10
+        mode = data.get('mode', 'full')  # По умолчанию full (10×10)
         is_timed = data.get('is_timed', False)
         user_id = data.get('user_id')
         group_id = data.get('group_id')  # Получаем group_id из запроса
