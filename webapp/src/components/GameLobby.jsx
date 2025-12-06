@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react'
 import { api } from '../utils/api'
 
 export default function GameLobby({ gameId, gameState, playerId, onCreateGame, user, onStateUpdate, socket, onLeaveGame, onDeleteGame, onClearGame, isCreator }) {
-  const [selectedMode, setSelectedMode] = useState('full')
   const [selectedTimer, setSelectedTimer] = useState(false)
   const [creating, setCreating] = useState(false)
   const [ready, setReady] = useState(false)
@@ -95,7 +94,7 @@ export default function GameLobby({ gameId, gameState, playerId, onCreateGame, u
     if (creating) return
     setCreating(true)
     try {
-      await onCreateGame(selectedMode, selectedTimer)
+      await onCreateGame('full', selectedTimer) // всегда классика 10×10
     } catch (err) {
       console.error('Ошибка:', err)
     } finally {
@@ -381,38 +380,9 @@ export default function GameLobby({ gameId, gameState, playerId, onCreateGame, u
         </h1>
         
         <div className="mb-8">
-          <label className="block text-xl font-bold mb-4 text-gray-800 dark:text-gray-200">Режим игры:</label>
-          <div className="space-y-3">
-            {[
-              { mode: 'full', name: 'Классика (10×10)', desc: '1×4, 2×3, 3×2, 4×1' },
-              { mode: 'classic', name: 'Обычный (8×8)', desc: '2×3, 2×2, 4×1' },
-              { mode: 'fast', name: 'Быстрый (6×6)', desc: '1×3, 1×2, 2×1' }
-            ].map(({ mode, name, desc }) => (
-              <button
-                key={mode}
-                onClick={() => setSelectedMode(mode)}
-                className={`w-full px-6 py-4 rounded-xl border-3 transition-all shadow-lg ${
-                  selectedMode === mode
-                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 shadow-xl scale-105 ring-4 ring-blue-200 dark:ring-blue-800'
-                    : 'border-gray-300 dark:border-gray-600 hover:border-blue-300 dark:hover:border-blue-700 hover:shadow-xl'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="text-left">
-                    <div className="font-bold text-lg text-gray-800 dark:text-gray-200">{name}</div>
-                    <div className="text-sm text-gray-600 dark:text-gray-400">{desc}</div>
-                  </div>
-                  {selectedMode === mode && (
-                    <span className="text-blue-500 text-3xl font-bold">✓</span>
-                  )}
-                </div>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="mb-8">
-          <label className="block text-xl font-bold mb-4 text-gray-800 dark:text-gray-200">Таймер:</label>
+          <div className="text-xl font-bold mb-2 text-gray-800 dark:text-gray-200">Режим: Классика 10×10</div>
+          <div className="text-sm text-gray-600 dark:text-gray-400 mb-4">1×4, 2×3, 3×2, 4×1</div>
+          <label className="block text-lg font-bold mb-3 text-gray-800 dark:text-gray-200">Таймер:</label>
           <div className="flex gap-3">
             <button
               onClick={() => setSelectedTimer(false)}
@@ -429,7 +399,7 @@ export default function GameLobby({ gameId, gameState, playerId, onCreateGame, u
               className={`flex-1 px-6 py-4 rounded-xl border-3 transition-all shadow-lg font-bold text-lg ${
                 selectedTimer
                   ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 shadow-xl scale-105 ring-4 ring-blue-200 dark:ring-blue-800'
-                  : 'border-gray-300 dark:border-gray-600 hover:border-blue-300 dark:hover:border-blue-700'
+                  : 'border-gray-300 dark:border-gray-600 hover-border-blue-300 dark:hover-border-blue-700'
               }`}
             >
               {selectedTimer && '✓ '}С таймером
