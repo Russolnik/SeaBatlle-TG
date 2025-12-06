@@ -7,6 +7,14 @@ export default function GameInfo({ gameState, playerId, isMyTurn }) {
 
   if (!myPlayer) return null
 
+  // Сортируем размеры для отображения
+  const sortedSizes = (sizesObj) => {
+    return Object.keys(sizesObj || {})
+      .map((k) => parseInt(k, 10))
+      .sort((a, b) => b - a)
+      .map((size) => ({ size, count: sizesObj[size] }))
+  }
+
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-4 mb-4">
       <div className="flex items-center justify-between">
@@ -43,8 +51,16 @@ export default function GameInfo({ gameState, playerId, isMyTurn }) {
         <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
           <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">Корабли противника:</div>
           <div className="flex flex-wrap gap-1">
+            {sortedSizes(opponent.ships_remaining_by_size).map(({ size, count }) => (
+              <span
+                key={size}
+                className="px-2 py-1 rounded text-xs font-semibold bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
+              >
+                {size}×{count}
+              </span>
+            ))}
             <span className="px-2 py-1 rounded text-xs font-semibold bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
-              Осталось: {opponent.ships_remaining ?? 0}
+              Итого: {opponent.ships_remaining ?? 0}
             </span>
           </div>
         </div>

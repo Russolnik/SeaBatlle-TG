@@ -1359,6 +1359,7 @@ def serialize_game_state(game: GameState, player_id: str) -> dict:
                 'attacks': player_attacks,
                 'ships': player.ships if player and hasattr(player, 'ships') else [],
                 'ships_remaining': get_remaining_ships(player) if player else 0,
+                'ships_remaining_by_size': get_remaining_ships_by_size(player) if player else {},
                 'ready': player.ready if player else False,
                 'ships_placed': player_ships_done
             },
@@ -1366,6 +1367,7 @@ def serialize_game_state(game: GameState, player_id: str) -> dict:
                 'user_id': opponent.user_id if opponent else None,
                 'username': opponent.username if opponent else None,
                 'ships_remaining': get_remaining_ships(opponent) if opponent else 0,
+                'ships_remaining_by_size': get_remaining_ships_by_size(opponent) if opponent else {},
                 'ready': opponent.ready if opponent else False,
                 'ships_placed': opponent_ships_done
             }
