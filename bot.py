@@ -1298,18 +1298,18 @@ def serialize_game_state(game: GameState, player_id: str) -> dict:
     player_ships_done = ships_placed(player)
     opponent_ships_done = ships_placed(opponent)
 
-    # Если нет второго игрока — даём возможность расставлять (setup), иначе лобби
+    # Если нет второго игрока — остаёмся в setup (расстановка/ожидание)
     if not game.players['p1'] or not game.players['p2']:
-        if player and (player.ships or not player_ships_done):
-            phase = 'setup'
-        else:
-            phase = 'lobby'
+        phase = 'setup'
     else:
-        # Оба игрока присутствуют
+        # Оба игрока присутствуют: сначала все корабли должны быть расставлены, потом оба должны нажать "Готов"
         if not player_ships_done or not opponent_ships_done:
             phase = 'setup'
-        else:
+        elif (game.players['p1'].ready and game.players['p2'].ready):
             phase = 'battle'
+        else:
+            # Корабли расставлены, но кто-то не подтвердил готовность
+            phase = 'setup'
 
     # Если бой должен идти, но текущий ход не установлен — ставим p1 по умолчанию
     if phase == 'battle' and not game.current_player:
@@ -1359,13 +1359,15 @@ def serialize_game_state(game: GameState, player_id: str) -> dict:
                 'attacks': player_attacks,
                 'ships': player.ships if player and hasattr(player, 'ships') else [],
                 'ships_remaining': get_remaining_ships(player) if player else 0,
-                'ready': player.ready if player else False
+                'ready': player.ready if player else False,
+                'ships_placed': player_ships_done
             },
             opponent_id: {
                 'user_id': opponent.user_id if opponent else None,
                 'username': opponent.username if opponent else None,
                 'ships_remaining': get_remaining_ships(opponent) if opponent else 0,
-                'ready': opponent.ready if opponent else False
+                'ready': opponent.ready if opponent else False,
+                'ships_placed': opponent_ships_done
             }
         },
         'ships_to_place': ships_to_place,

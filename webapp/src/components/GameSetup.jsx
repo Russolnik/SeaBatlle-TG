@@ -137,6 +137,14 @@ export default function GameSetup({ gameState, playerId, user, onStateUpdate, so
 
   const shipsToPlace = gameState.ships_to_place || []
   const allShipsPlaced = shipsToPlace.length === 0
+  const p1 = gameState.players?.p1
+  const p2 = gameState.players?.p2
+  const statusLabel = (pl) => {
+    if (!pl) return '—'
+    if (!pl.ships_placed) return 'Расстановка'
+    if (pl.ready) return 'Готов'
+    return 'Ожидает готовности'
+  }
 
   const handleJoinByCode = () => {
     const code = prompt('Введите код комнаты (например, ABCD1234):', roomCode || '')
@@ -210,6 +218,24 @@ export default function GameSetup({ gameState, playerId, user, onStateUpdate, so
         <h1 className="text-4xl font-bold mb-6 text-center text-gray-800 dark:text-gray-200 drop-shadow-lg">
           ⚓ Расстановка кораблей
         </h1>
+
+        <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm rounded-2xl shadow-2xl p-4 mb-4 border-2 border-blue-200 dark:border-blue-700">
+          <h3 className="text-lg font-bold mb-3 text-gray-800 dark:text-gray-200">Игроки</h3>
+          <div className="space-y-2 text-sm text-gray-700 dark:text-gray-300">
+            <div className="flex items-center justify-between">
+              <span>Создатель: @{p1?.username || 'p1'}</span>
+              <span className={`font-semibold ${p1?.ready ? 'text-green-500' : 'text-gray-400'}`}>
+                {statusLabel(p1)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span>Гость: @{p2?.username || '—'}</span>
+              <span className={`font-semibold ${p2?.ready ? 'text-green-500' : 'text-gray-400'}`}>
+                {statusLabel(p2)}
+              </span>
+            </div>
+          </div>
+        </div>
 
         {autoPlaced && (
           <div className="bg-green-100 dark:bg-green-900/40 border-3 border-green-500 rounded-xl p-4 mb-6 shadow-lg">
