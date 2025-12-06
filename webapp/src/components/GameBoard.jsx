@@ -6,6 +6,7 @@ import { api } from '../utils/api'
 export default function GameBoard({ gameState, playerId, user, onStateUpdate, socket, onLeaveGame, onDeleteGame, isCreator }) {
   const [isMyTurn, setIsMyTurn] = useState(false)
   const [attacking, setAttacking] = useState(false)
+  const [copied, setCopied] = useState(false)
   const containerRef = useRef(null)
   const roomCode = (typeof window !== 'undefined' && localStorage.getItem('roomCode')) || ''
   const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
@@ -118,17 +119,10 @@ export default function GameBoard({ gameState, playerId, user, onStateUpdate, so
       if (navigator?.clipboard?.writeText) {
         await navigator.clipboard.writeText(shareLink)
       }
-      if (user?.id && roomCode) {
-        await api.post('/api/share/link', {
-          user_id: user.id,
-          room_code: roomCode,
-          link: shareLink
-        })
-      }
-      alert('Ссылка скопирована и отправлена ботом в личные сообщения.')
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
     } catch (err) {
       console.error('Share error', err)
-      alert('Не удалось отправить ссылку. Скопируйте вручную: ' + shareLink)
     }
   }
 
@@ -146,6 +140,7 @@ export default function GameBoard({ gameState, playerId, user, onStateUpdate, so
             >
               🔗 Поделиться
             </button>
+            {copied && <span className="text-xs text-green-500">Скопировано</span>}
             <button
               onClick={() => {
                 const code = prompt('Введите код комнаты (например, ABCD1234):', roomCode || '')

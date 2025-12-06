@@ -7,6 +7,7 @@ export default function GameSetup({ gameState, playerId, user, onStateUpdate, so
   const [placing, setPlacing] = useState(false)
   const [autoPlaced, setAutoPlaced] = useState(false)
   const [horizontal, setHorizontal] = useState(true)
+  const [copied, setCopied] = useState(false)
   const roomCode = (typeof window !== 'undefined' && localStorage.getItem('roomCode')) || ''
   const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
   const botParam = (urlParams && urlParams.get('bot')) || 'seabattles_game_bot'
@@ -154,18 +155,10 @@ export default function GameSetup({ gameState, playerId, user, onStateUpdate, so
       if (navigator?.clipboard?.writeText) {
         await navigator.clipboard.writeText(shareLink)
       }
-      // Просим бэкенд отправить ссылку в личку
-      if (user?.id && roomCode) {
-        await api.post('/api/share/link', {
-          user_id: user.id,
-          room_code: roomCode,
-          link: shareLink
-        })
-      }
-      alert('Ссылка скопирована и отправлена ботом в личные сообщения.')
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
     } catch (err) {
       console.error('Share error', err)
-      alert('Не удалось отправить ссылку. Скопируйте вручную: ' + shareLink)
     }
   }
 
@@ -183,6 +176,7 @@ export default function GameSetup({ gameState, playerId, user, onStateUpdate, so
             >
               🔗 Поделиться
             </button>
+            {copied && <span className="text-xs text-green-500">Скопировано</span>}
             <button
               onClick={handleJoinByCode}
               className="px-3 py-1 text-sm bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-all"
