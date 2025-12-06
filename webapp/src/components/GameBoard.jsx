@@ -126,6 +126,15 @@ export default function GameBoard({ gameState, playerId, user, onStateUpdate, so
     }
   }
 
+  const statusText = () => {
+    if (gameState.winner) {
+      return gameState.winner === playerId
+        ? '🏆 Победа! Противник потерял все корабли.'
+        : '❌ Поражение. Ваши корабли уничтожены.'
+    }
+    return isMyTurn ? 'Ваш ход — выберите клетку для атаки' : 'Ход противника'
+  }
+
   return (
     <div ref={containerRef} className="min-h-screen p-4 pb-20 bg-gradient-to-b from-blue-50 via-sky-50 to-cyan-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
       <div className="max-w-5xl mx-auto">
@@ -181,6 +190,10 @@ export default function GameBoard({ gameState, playerId, user, onStateUpdate, so
         </div>
         <GameInfo gameState={gameState} playerId={playerId} isMyTurn={isMyTurn} />
 
+        <div className="mt-2 mb-4 px-4 py-3 rounded-xl bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-center font-semibold text-gray-800 dark:text-gray-100">
+          {statusText()}
+        </div>
+
         <div className="grid grid-cols-1 gap-8 mt-6">
           {/* Поле противника - СВЕРХУ */}
           <div className="bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm rounded-2xl shadow-2xl p-6 border-4 border-blue-300 dark:border-blue-700">
@@ -191,15 +204,10 @@ export default function GameBoard({ gameState, playerId, user, onStateUpdate, so
               <Board
                 board={myPlayer.attacks}
                 size={gameState.config?.size || 10}
-                interactive={isMyTurn && !attacking}
+                interactive={isMyTurn && !attacking && !gameState.winner}
                 onCellClick={handleAttack}
               />
             </div>
-            {attacking && (
-              <div className="text-center mt-4 text-blue-600 dark:text-blue-400 text-lg font-bold">
-                ⚡ Атака...
-              </div>
-            )}
           </div>
 
           {/* Ваше поле - СНИЗУ */}
