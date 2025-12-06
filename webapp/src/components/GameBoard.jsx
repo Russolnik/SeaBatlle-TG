@@ -3,7 +3,7 @@ import Board from './Board'
 import GameInfo from './GameInfo'
 import { api } from '../utils/api'
 
-export default function GameBoard({ gameState, playerId, onStateUpdate, socket, onLeaveGame, onDeleteGame, isCreator }) {
+export default function GameBoard({ gameState, playerId, user, onStateUpdate, socket, onLeaveGame, onDeleteGame, isCreator }) {
   const [isMyTurn, setIsMyTurn] = useState(false)
   const [attacking, setAttacking] = useState(false)
   const containerRef = useRef(null)
@@ -112,6 +112,26 @@ export default function GameBoard({ gameState, playerId, onStateUpdate, socket, 
     }
   }
 
+  const handleShare = async () => {
+    if (!shareLink) return
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(shareLink)
+      }
+      if (user?.id && roomCode) {
+        await api.post('/api/share/link', {
+          user_id: user.id,
+          room_code: roomCode,
+          link: shareLink
+        })
+      }
+      alert('Ссылка скопирована и отправлена ботом в личные сообщения.')
+    } catch (err) {
+      console.error('Share error', err)
+      alert('Не удалось отправить ссылку. Скопируйте вручную: ' + shareLink)
+    }
+  }
+
   return (
     <div ref={containerRef} className="min-h-screen p-4 pb-20 bg-gradient-to-b from-blue-50 via-sky-50 to-cyan-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
       <div className="max-w-5xl mx-auto">
@@ -120,7 +140,7 @@ export default function GameBoard({ gameState, playerId, onStateUpdate, socket, 
             <span className="text-sm text-gray-600 dark:text-gray-300">Код комнаты:</span>
             <span className="font-mono font-bold text-blue-600 dark:text-blue-300">{roomCode || '—'}</span>
             <button
-              onClick={() => shareLink && window.open(shareLink, '_blank')}
+              onClick={handleShare}
               disabled={!shareLink}
               className="px-3 py-1 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 transition-all"
             >

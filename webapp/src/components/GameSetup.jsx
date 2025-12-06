@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import Board from './Board'
 import { api } from '../utils/api'
 
-export default function GameSetup({ gameState, playerId, onStateUpdate, socket, onLeaveGame, onDeleteGame, isCreator }) {
+export default function GameSetup({ gameState, playerId, user, onStateUpdate, socket, onLeaveGame, onDeleteGame, isCreator }) {
   const [placingShip, setPlacingShip] = useState(null)
   const [placing, setPlacing] = useState(false)
   const [autoPlaced, setAutoPlaced] = useState(false)
@@ -147,9 +147,26 @@ export default function GameSetup({ gameState, playerId, onStateUpdate, socket, 
     window.location.href = `${base}?startapp=room-${normalized}&bot=${bot}`
   }
 
-  const handleShare = () => {
+  const handleShare = async () => {
     if (!shareLink) return
-    window.open(shareLink, '_blank')
+    try {
+      // Копируем в буфер
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(shareLink)
+      }
+      // Просим бэкенд отправить ссылку в личку
+      if (user?.id && roomCode) {
+        await api.post('/api/share/link', {
+          user_id: user.id,
+          room_code: roomCode,
+          link: shareLink
+        })
+      }
+      alert('Ссылка скопирована и отправлена ботом в личные сообщения.')
+    } catch (err) {
+      console.error('Share error', err)
+      alert('Не удалось отправить ссылку. Скопируйте вручную: ' + shareLink)
+    }
   }
 
   return (

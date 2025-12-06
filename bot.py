@@ -1230,6 +1230,10 @@ def serialize_game_state(game: GameState, player_id: str) -> dict:
             phase = 'setup'
         else:
             phase = 'battle'
+
+    # Если бой должен идти, но текущий ход не установлен — ставим p1 по умолчанию
+    if phase == 'battle' and not game.current_player:
+        game.current_player = 'p1'
     
     # Корабли для размещения (для фазы setup)
     ships_to_place = []

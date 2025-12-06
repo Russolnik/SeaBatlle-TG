@@ -445,6 +445,7 @@ function App() {
       <GameSetup
         gameState={gameState}
         playerId={playerId}
+        user={user}
         onStateUpdate={setGameState}
         socket={socket}
         onLeaveGame={leaveGame}
@@ -461,6 +462,7 @@ function App() {
       <GameBoard
         gameState={gameState}
         playerId={playerId}
+        user={user}
         onStateUpdate={setGameState}
         socket={socket}
         onLeaveGame={leaveGame}
