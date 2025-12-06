@@ -134,6 +134,8 @@ export default function GameLobby({ gameId, gameState, playerId, onCreateGame, u
     const myPlayer = gameState.players[playerId]
     const opponentId = playerId === 'p1' ? 'p2' : 'p1'
     const opponent = gameState.players[opponentId]
+    const creator = gameState.players?.p1
+    const joiner = gameState.players?.p2
     
     // Если есть оба игрока
     if (myPlayer && opponent && opponent.user_id) {
@@ -191,6 +193,24 @@ export default function GameLobby({ gameId, gameState, playerId, onCreateGame, u
               ⚓ Готовность к игре
             </h1>
             
+            <div className="mb-4 bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4 border border-gray-200 dark:border-gray-600">
+              <div className="font-bold text-gray-800 dark:text-gray-200 mb-2">Игроки</div>
+              <div className="space-y-2 text-sm text-gray-700 dark:text-gray-300">
+                <div className="flex items-center justify-between">
+                  <span>Создатель: @{creator?.username || 'p1'}</span>
+                  <span className={`font-semibold ${creator?.ready ? 'text-green-500' : 'text-gray-400'}`}>
+                    {creator?.ready ? '✅ Готов' : '⏳ Не готов'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span>Гость: @{joiner?.username || 'p2'}</span>
+                  <span className={`font-semibold ${joiner?.ready ? 'text-green-500' : 'text-gray-400'}`}>
+                    {joiner?.ready ? '✅ Готов' : '⏳ Не готов'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
             <div className="mb-6 space-y-4">
               <div className="bg-blue-50 dark:bg-blue-900/30 rounded-xl p-4 border-2 border-blue-200 dark:border-blue-700">
                 <div className="flex items-center justify-between mb-2">
@@ -294,6 +314,23 @@ export default function GameLobby({ gameId, gameState, playerId, onCreateGame, u
               </>
             )}
           </p>
+          <div className="mb-4 bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4 border border-gray-200 dark:border-gray-600">
+            <div className="font-bold text-gray-800 dark:text-gray-200 mb-2">Игроки</div>
+            <div className="space-y-2 text-sm text-gray-700 dark:text-gray-300">
+              <div className="flex items-center justify-between">
+                <span>Создатель: @{gameState.players?.p1?.username || 'p1'}</span>
+                <span className={`font-semibold ${gameState.players?.p1?.ready ? 'text-green-500' : 'text-gray-400'}`}>
+                  {gameState.players?.p1?.ready ? '✅ Готов' : '⏳ Не готов'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>Гость: @{gameState.players?.p2?.username || '—'}</span>
+                <span className={`font-semibold ${gameState.players?.p2?.ready ? 'text-green-500' : 'text-gray-400'}`}>
+                  {gameState.players?.p2?.ready ? '✅ Готов' : '⏳ Не готов'}
+                </span>
+              </div>
+            </div>
+          </div>
           <div className="mb-6">
             <input
               type="text"
@@ -328,6 +365,16 @@ export default function GameLobby({ gameId, gameState, playerId, onCreateGame, u
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-blue-50 via-sky-50 to-cyan-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
       <div className="bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm rounded-2xl shadow-2xl p-8 max-w-lg w-full border-4 border-blue-300 dark:border-blue-700">
+        <div className="flex flex-wrap items-center gap-2 mb-4 bg-white/90 dark:bg-gray-800/80 px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700">
+          <span className="text-sm text-gray-600 dark:text-gray-300">Код комнаты:</span>
+          <span className="font-mono font-bold text-blue-600 dark:text-blue-300">{roomCode || '—'}</span>
+          <button
+            onClick={handleJoinByCode}
+            className="px-3 py-1 text-sm bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-all"
+          >
+            ➕ Подключиться по коду
+          </button>
+        </div>
         <h1 className="text-5xl font-bold mb-8 text-center text-gray-800 dark:text-gray-200 drop-shadow-lg">
           ⚓ Морской бой
         </h1>

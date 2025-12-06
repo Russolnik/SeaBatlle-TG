@@ -992,6 +992,56 @@ def api_get_active_game():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/share/link', methods=['POST', 'OPTIONS'])
+def api_share_link():
+    """Отправить пользователю ссылку на игру от имени бота"""
+    if request.method == 'OPTIONS':
+        return jsonify({}), 200
+    try:
+        data = request.json or {}
+        user_id = data.get('user_id')
+        room_code = data.get('room_code')
+        link = data.get('link')
+        if not user_id or not link:
+            return jsonify({'error': 'user_id and link required'}), 400
+
+        text = "🎮 Ссылка на игру в Морской Бой\n\n"
+        if room_code:
+            text += f"🆔 Код комнаты: <code>{room_code}</code>\n"
+        text += f"🔗 {link}\n\n"
+        text += "Отправьте эту ссылку другу, чтобы он мог присоединиться."
+
+        async def send():
+            try:
+                await bot.send_message(chat_id=int(user_id), text=text, parse_mode='HTML', disable_web_page_preview=True)
+                logger.info(f"Отправлена ссылка на игру пользователю {user_id} (room_code={room_code})")
+            except Exception as e:
+                logger.error(f"Ошибка отправки ссылки пользователю {user_id}: {e}", exc_info=True)
+
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        if loop.is_running():
+            import concurrent.futures
+            future = asyncio.run_coroutine_threadsafe(send(), loop)
+            try:
+                future.result(timeout=2)
+            except concurrent.futures.TimeoutError:
+                pass
+            except Exception as e:
+                logger.error(f"Ошибка в run_coroutine_threadsafe: {e}", exc_info=True)
+        else:
+            loop.run_until_complete(send())
+
+        return jsonify({'status': 'ok'}), 200
+    except Exception as e:
+        logger.error(f"Ошибка /api/share/link: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/game/<game_id>/leave', methods=['POST', 'OPTIONS'])
 def api_leave_game(game_id):
     """Выйти из игры (p2 освобождает слот, p1 удаляет игру)"""
