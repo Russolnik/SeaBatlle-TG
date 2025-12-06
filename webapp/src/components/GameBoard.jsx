@@ -7,6 +7,10 @@ export default function GameBoard({ gameState, playerId, onStateUpdate, socket, 
   const [isMyTurn, setIsMyTurn] = useState(false)
   const [attacking, setAttacking] = useState(false)
   const containerRef = useRef(null)
+  const roomCode = (typeof window !== 'undefined' && localStorage.getItem('roomCode')) || ''
+  const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
+  const botParam = (urlParams && urlParams.get('bot')) || 'seabattles_game_bot'
+  const shareLink = roomCode ? `https://t.me/${botParam.replace('@', '')}?start=room-${roomCode}` : null
 
   // Слушаем WebSocket обновления для синхронизации состояния
   useEffect(() => {
@@ -111,21 +115,48 @@ export default function GameBoard({ gameState, playerId, onStateUpdate, socket, 
   return (
     <div ref={containerRef} className="min-h-screen p-4 pb-20 bg-gradient-to-b from-blue-50 via-sky-50 to-cyan-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
       <div className="max-w-5xl mx-auto">
-        <div className="flex justify-end gap-2 mb-2">
-          <button
-            onClick={onLeaveGame}
-            className="px-3 py-2 text-sm bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-all"
-          >
-            🚪 Выйти
-          </button>
-          {isCreator && (
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+          <div className="flex items-center gap-2 bg-white/80 dark:bg-gray-800/80 px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700">
+            <span className="text-sm text-gray-600 dark:text-gray-300">Код комнаты:</span>
+            <span className="font-mono font-bold text-blue-600 dark:text-blue-300">{roomCode || '—'}</span>
             <button
-              onClick={onDeleteGame}
-              className="px-3 py-2 text-sm bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
+              onClick={() => shareLink && window.open(shareLink, '_blank')}
+              disabled={!shareLink}
+              className="px-3 py-1 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 transition-all"
             >
-              🗑 Удалить
+              🔗 Поделиться
             </button>
-          )}
+            <button
+              onClick={() => {
+                const code = prompt('Введите код комнаты (например, ABCD1234):', roomCode || '')
+                if (!code) return
+                const normalized = code.trim().toUpperCase()
+                localStorage.setItem('roomCode', normalized)
+                const bot = botParam.replace('@', '')
+                const base = window.location.origin + window.location.pathname
+                window.location.href = `${base}?startapp=room-${normalized}&bot=${bot}`
+              }}
+              className="px-3 py-1 text-sm bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-all"
+            >
+              ➕ Подключиться по коду
+            </button>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={onLeaveGame}
+              className="px-3 py-2 text-sm bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-all"
+            >
+              🚪 Выйти
+            </button>
+            {isCreator && (
+              <button
+                onClick={onDeleteGame}
+                className="px-3 py-2 text-sm bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
+              >
+                🗑 Удалить
+              </button>
+            )}
+          </div>
         </div>
         <GameInfo gameState={gameState} playerId={playerId} isMyTurn={isMyTurn} />
 
