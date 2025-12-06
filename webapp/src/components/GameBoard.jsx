@@ -13,15 +13,16 @@ export default function GameBoard({ gameState, playerId, onStateUpdate, socket }
     if (!socket || !gameState?.id) return
 
     const handleGameState = (state) => {
-      if (state && state.id === gameState.id && onStateUpdate) {
-        console.log('GameBoard: получено обновление game_state через WebSocket', { 
-          gameId: state.id, 
-          phase: state.phase,
-          current_player: state.current_player,
-          player_id: state.player_id
-        })
-        onStateUpdate(state)
-      }
+      if (!state || state.id !== gameState.id) return
+      if (state.player_id && playerId && state.player_id !== playerId) return
+
+      console.log('GameBoard: получено обновление game_state через WebSocket', { 
+        gameId: state.id, 
+        phase: state.phase,
+        current_player: state.current_player,
+        player_id: state.player_id
+      })
+      if (onStateUpdate) onStateUpdate(state)
     }
 
     socket.on('game_state', handleGameState)
@@ -29,7 +30,7 @@ export default function GameBoard({ gameState, playerId, onStateUpdate, socket }
     return () => {
       socket.off('game_state', handleGameState)
     }
-  }, [socket, gameState?.id, onStateUpdate])
+  }, [socket, gameState?.id, playerId, onStateUpdate])
 
   useEffect(() => {
     if (gameState && playerId) {

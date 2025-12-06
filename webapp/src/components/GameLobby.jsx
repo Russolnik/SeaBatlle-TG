@@ -14,17 +14,19 @@ export default function GameLobby({ gameId, gameState, playerId, onCreateGame, u
     if (!socket || !gameId) return
 
     const handleGameState = (state) => {
-      if (state && state.id === gameId && onStateUpdate) {
-        console.log('GameLobby: получено обновление game_state через WebSocket', { 
-          gameId: state.id, 
-          phase: state.phase,
-          players: state.players ? {
-            p1: { ready: state.players.p1?.ready, user_id: state.players.p1?.user_id },
-            p2: { ready: state.players.p2?.ready, user_id: state.players.p2?.user_id }
-          } : null
-        })
-        onStateUpdate(state)
-      }
+      if (!state || state.id !== gameId) return
+      // Если пришло состояние для другого player_id, а у нас уже есть свой — игнорируем
+      if (state.player_id && playerId && state.player_id !== playerId) return
+
+      console.log('GameLobby: получено обновление game_state через WebSocket', { 
+        gameId: state.id, 
+        phase: state.phase,
+        players: state.players ? {
+          p1: { ready: state.players.p1?.ready, user_id: state.players.p1?.user_id },
+          p2: { ready: state.players.p2?.ready, user_id: state.players.p2?.user_id }
+        } : null
+      })
+      if (onStateUpdate) onStateUpdate(state)
     }
 
     socket.on('game_state', handleGameState)
@@ -32,7 +34,7 @@ export default function GameLobby({ gameId, gameState, playerId, onCreateGame, u
     return () => {
       socket.off('game_state', handleGameState)
     }
-  }, [socket, gameId, onStateUpdate])
+  }, [socket, gameId, playerId, onStateUpdate])
 
   useEffect(() => {
     // Получаем username бота из API

@@ -13,14 +13,15 @@ export default function GameSetup({ gameState, playerId, onStateUpdate, socket }
     if (!socket || !gameState?.id) return
 
     const handleGameState = (state) => {
-      if (state && state.id === gameState.id && onStateUpdate) {
-        console.log('GameSetup: получено обновление game_state через WebSocket', { 
-          gameId: state.id, 
-          phase: state.phase,
-          player_id: state.player_id
-        })
-        onStateUpdate(state)
-      }
+      if (!state || state.id !== gameState.id) return
+      if (state.player_id && playerId && state.player_id !== playerId) return
+
+      console.log('GameSetup: получено обновление game_state через WebSocket', { 
+        gameId: state.id, 
+        phase: state.phase,
+        player_id: state.player_id
+      })
+      if (onStateUpdate) onStateUpdate(state)
     }
 
     socket.on('game_state', handleGameState)
@@ -28,7 +29,7 @@ export default function GameSetup({ gameState, playerId, onStateUpdate, socket }
     return () => {
       socket.off('game_state', handleGameState)
     }
-  }, [socket, gameState?.id, onStateUpdate])
+  }, [socket, gameState?.id, playerId, onStateUpdate])
 
   if (!gameState || !gameState.id || !playerId || !gameState.players) {
     return <div className="flex items-center justify-center min-h-screen">Загрузка...</div>

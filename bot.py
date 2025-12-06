@@ -988,20 +988,59 @@ def api_ready(game_id):
         
         game = games[game_id]
         player = game.get_player(player_id)
+        opponent_id = 'p2' if player_id == 'p1' else 'p1'
+        opponent = game.get_player(opponent_id)
         
         if not player:
             return jsonify({'error': 'Player not found'}), 400
         
-        # Переключаем готовность игрока
-        player.ready = not player.ready
+        # Проверяем, расставлены ли все корабли у игрока
+        config = get_ship_config(game.mode)
+        required_ships_dict = {}
+        for size in config['ships']:
+            required_ships_dict[size] = required_ships_dict.get(size, 0) + 1
         
-        logger.info(f"Игрок {player_id} изменил готовность: {player.ready}")
+        placed_ships = {}
+        if player.ships:
+            for ship in player.ships:
+                if ship and ship.get('size'):
+                    placed_ships[ship['size']] = placed_ships.get(ship['size'], 0) + 1
         
-        # Если оба игрока готовы, переходим в фазу расстановки (setup)
-        # Бой начнется только после расстановки всех кораблей
+        all_ships_placed_player = all(
+            placed_ships.get(size, 0) >= count
+            for size, count in required_ships_dict.items()
+        )
+        
+        # Если все корабли уже расставлены — фиксируем ready в True, не переключаем обратно
+        if all_ships_placed_player:
+            player.ready = True
+        else:
+            # Лобби: разрешаем переключать готовность
+            player.ready = not player.ready
+        
+        # Проверяем, расставлены ли корабли у соперника
+        placed_ships_opponent = {}
+        if opponent and opponent.ships:
+            for ship in opponent.ships:
+                if ship and ship.get('size'):
+                    placed_ships_opponent[ship['size']] = placed_ships_opponent.get(ship['size'], 0) + 1
+        all_ships_placed_opponent = all(
+            placed_ships_opponent.get(size, 0) >= count
+            for size, count in required_ships_dict.items()
+        )
+        
+        logger.info(f"Игрок {player_id} изменил готовность: {player.ready} (ships placed: {all_ships_placed_player})")
+        
+        # Если оба игрока готовы и оба расставили корабли — запускаем бой
         if game.players['p1'] and game.players['p1'].ready and \
-           game.players['p2'] and game.players['p2'].ready:
-            logger.info(f"Оба игрока готовы! Игра {game_id} переходит в фазу расстановки кораблей.")
+           game.players['p2'] and game.players['p2'].ready and \
+           all_ships_placed_player and all_ships_placed_opponent:
+            if not game.current_player:
+                game.current_player = 'p1'
+            game.phase = 'battle'
+            logger.info(f"Оба игрока готовы и все корабли расставлены! Игра {game_id} переходит в бой. Первый ход: {game.current_player}")
+        else:
+            logger.info(f"Игра {game_id}: готовность p1={game.players['p1'].ready if game.players['p1'] else None}, p2={game.players['p2'].ready if game.players['p2'] else None}, ships placed p1={all_ships_placed_player}, p2={all_ships_placed_opponent}")
         
         # Уведомляем через WebSocket обоих игроков
         state_p1 = serialize_game_state(game, 'p1')

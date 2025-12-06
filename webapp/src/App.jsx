@@ -100,48 +100,32 @@ function App() {
     if (!socket || !connected) return
 
     const handleGameState = (state) => {
-      if (state && state.id) {
-        console.log('WebSocket: получено обновление game_state', { gameId: state.id, phase: state.phase, player_id: state.player_id, currentPlayerId: playerId })
-        
-        // Проверяем, что это состояние для текущего игрока
-        // Если player_id не совпадает, но это та же игра - обновляем состояние (общая информация одинаковая)
-        // Но предпочитаем использовать состояние с правильным player_id
-        if (state.player_id && playerId && state.player_id !== playerId) {
-          // Это состояние для другого игрока, но общая информация (готовность, phase) должна быть одинаковой
-          // Обновляем состояние, но сохраняем текущий playerId
-          if (state.id === gameId) {
-            console.log('WebSocket: получено состояние для другого игрока, обновляем общую информацию', { 
-              receivedPlayerId: state.player_id, 
-              currentPlayerId: playerId,
-              phase: state.phase 
-            })
-            const scrollY = window.scrollY
-            setGameState(state)
-            requestAnimationFrame(() => {
-              window.scrollTo(0, scrollY)
-            })
-          }
-          return
-        }
-        
-        // Сохраняем позицию скролла перед обновлением
-        const scrollY = window.scrollY
-        
-        // Обновляем состояние игры
-        setGameState(state)
-        setGameId(state.id)
-        localStorage.setItem('activeGameId', state.id)
-        
-        // Обновляем playerId если он изменился или если его еще нет
-        if (state.player_id) {
-          setPlayerId(state.player_id)
-        }
-        
-        // Восстанавливаем позицию скролла после обновления
-        requestAnimationFrame(() => {
-          window.scrollTo(0, scrollY)
-        })
+      if (!state || !state.id) return
+
+      // Игнорируем чужие игры
+      if (gameId && state.id !== gameId) return
+
+      // Игнорируем состояния для другого player_id, если у нас уже задан свой
+      if (state.player_id && playerId && state.player_id !== playerId) {
+        return
       }
+
+      console.log('WebSocket: получено обновление game_state', { gameId: state.id, phase: state.phase, player_id: state.player_id, currentPlayerId: playerId })
+
+      const scrollY = window.scrollY
+
+      setGameState(state)
+      setGameId(state.id)
+      localStorage.setItem('activeGameId', state.id)
+
+      // Фиксируем playerId только если он совпадает или еще не задан
+      if (state.player_id && (!playerId || state.player_id === playerId)) {
+        setPlayerId(state.player_id)
+      }
+
+      requestAnimationFrame(() => {
+        window.scrollTo(0, scrollY)
+      })
     }
 
     socket.on('game_state', handleGameState)
@@ -149,7 +133,7 @@ function App() {
     return () => {
       socket.off('game_state', handleGameState)
     }
-  }, [socket, connected, gameId])
+  }, [socket, connected, gameId, playerId])
 
   const loadGameByRoomCode = async (roomCode) => {
     if (!user || !roomCode) return
