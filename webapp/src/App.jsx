@@ -151,16 +151,25 @@ function App() {
         setGameId(gameId)
         localStorage.setItem('activeGameId', gameId)
         
-        // Загружаем состояние игры
+        // Загружаем состояние игры (сначала p1, потом при необходимости p2)
         try {
-          const state = await api.get(`/api/game/${gameId}/state?player_id=p1`)
+          let state = await api.get(`/api/game/${gameId}/state?player_id=p1`)
           
-          // Проверяем, в игре ли пользователь
+          // Проверяем принадлежность
           const p1 = state.players?.p1
           const p2 = state.players?.p2
-          const isInGame = (p1?.user_id === user.id) || (p2?.user_id === user.id)
+          const isP1 = p1?.user_id === user.id
+          const isP2 = p2?.user_id === user.id
           
-          if (!isInGame && (!p2 || !p2.user_id)) {
+          // Если пользователь — p2, запрашиваем состояние с player_id=p2, чтобы получить его board/attacks
+          if (!isP1 && isP2) {
+            state = await api.get(`/api/game/${gameId}/state?player_id=p2`)
+            setPlayerId('p2')
+            setGameState(state)
+            return
+          }
+          
+          if (!isP1 && !isP2 && (!p2 || !p2.user_id)) {
             // Присоединяемся к игре, если есть место
             try {
               const joinRes = await api.post(`/api/game/${gameId}/join`, {
@@ -170,15 +179,14 @@ function App() {
               setPlayerId(joinRes.player_id)
               setGameState(joinRes.game_state)
             } catch (joinErr) {
-              // Если не удалось присоединиться, просто загружаем состояние
+              // Если не удалось присоединиться, просто используем текущее состояние (p1 по умолчанию)
               setGameState(state)
-              if (p1?.user_id === user.id) setPlayerId('p1')
-              else if (p2?.user_id === user.id) setPlayerId('p2')
+              if (isP1) setPlayerId('p1')
             }
           } else {
             setGameState(state)
-            if (p1?.user_id === user.id) setPlayerId('p1')
-            else if (p2?.user_id === user.id) setPlayerId('p2')
+            if (isP1) setPlayerId('p1')
+            else if (isP2) setPlayerId('p2')
           }
         } catch (err) {
           console.error('Ошибка загрузки состояния игры:', err)
@@ -242,12 +250,23 @@ function App() {
       }
       
       // Пытаемся получить состояние игры
-      const state = await api.get(`/api/game/${gameId}/state?player_id=p1`)
+      let state = await api.get(`/api/game/${gameId}/state?player_id=p1`)
       
-      // Проверяем, в игре ли пользователь
       const p1 = state.players?.p1
       const p2 = state.players?.p2
-      const isInGame = (p1?.user_id === user.id) || (p2?.user_id === user.id)
+      const isP1 = p1?.user_id === user.id
+      const isP2 = p2?.user_id === user.id
+      
+      // Если пользователь — p2, запрашиваем состояние с player_id=p2, чтобы был его board/attacks
+      if (!isP1 && isP2) {
+        state = await api.get(`/api/game/${gameId}/state?player_id=p2`)
+        setPlayerId('p2')
+        setGameState(state)
+        localStorage.setItem('activeGameId', gameId)
+        return
+      }
+      
+      const isInGame = isP1 || isP2
       
       if (!isInGame && (!p2 || !p2.user_id)) {
         // Присоединяемся к игре, если есть место
@@ -260,16 +279,16 @@ function App() {
           setGameState(joinRes.game_state)
           localStorage.setItem('activeGameId', gameId)
         } catch (joinErr) {
-          // Если не удалось присоединиться (игра заполнена), просто загружаем состояние
+          // Если не удалось присоединиться (игра заполнена), просто загружаем состояние p1
           setGameState(state)
-          if (p1?.user_id === user.id) setPlayerId('p1')
-          else if (p2?.user_id === user.id) setPlayerId('p2')
+          if (isP1) setPlayerId('p1')
+          else if (isP2) setPlayerId('p2')
           localStorage.setItem('activeGameId', gameId)
         }
       } else {
         setGameState(state)
-        if (p1?.user_id === user.id) setPlayerId('p1')
-        else if (p2?.user_id === user.id) setPlayerId('p2')
+        if (isP1) setPlayerId('p1')
+        else if (isP2) setPlayerId('p2')
         localStorage.setItem('activeGameId', gameId)
       }
     } catch (err) {
