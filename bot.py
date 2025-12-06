@@ -237,7 +237,7 @@ def api_create_game():
     
     try:
         data = request.json
-        mode = data.get('mode', 'full')  # По умолчанию full (10×10)
+        mode = 'full'  # Оставляем только режим 10×10
         is_timed = data.get('is_timed', False)
         user_id = data.get('user_id')
         group_id = data.get('group_id')  # Получаем group_id из запроса
@@ -1359,7 +1359,6 @@ def serialize_game_state(game: GameState, player_id: str) -> dict:
                 'attacks': player_attacks,
                 'ships': player.ships if player and hasattr(player, 'ships') else [],
                 'ships_remaining': get_remaining_ships(player) if player else 0,
-                'ships_remaining_by_size': get_remaining_ships_by_size(player) if player else {},
                 'ready': player.ready if player else False,
                 'ships_placed': player_ships_done
             },
@@ -1367,7 +1366,6 @@ def serialize_game_state(game: GameState, player_id: str) -> dict:
                 'user_id': opponent.user_id if opponent else None,
                 'username': opponent.username if opponent else None,
                 'ships_remaining': get_remaining_ships(opponent) if opponent else 0,
-                'ships_remaining_by_size': get_remaining_ships_by_size(opponent) if opponent else {},
                 'ready': opponent.ready if opponent else False,
                 'ships_placed': opponent_ships_done
             }

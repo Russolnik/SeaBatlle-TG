@@ -252,21 +252,6 @@ def get_remaining_ships(player: Player) -> int:
     return sum(1 for ship in player.ships if not ship['destroyed'])
 
 
-def get_remaining_ships_by_size(player: Player) -> dict[int, int]:
-    """Получить остаток кораблей по размерам"""
-    sizes: dict[int, int] = {}
-    if not player or not player.ships:
-        return sizes
-    for ship in player.ships:
-        size = ship.get('size')
-        if size is None:
-            continue
-        if ship.get('destroyed'):
-            continue
-        sizes[size] = sizes.get(size, 0) + 1
-    return sizes
-
-
 def get_preview_board(
     board: list[list[str]],
     size: int,
