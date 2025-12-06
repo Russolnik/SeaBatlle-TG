@@ -30,6 +30,10 @@ from room_manager import room_manager
 
 load_dotenv()
 
+# Утилита активности игры
+def touch_game(game: GameState):
+    game.last_activity = datetime.now().timestamp()
+
 # Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
@@ -316,6 +320,7 @@ def api_create_game():
                     time_limit=time_limit,
                     group_id=group_id
                 )
+                touch_game(game)
                 
                 p1 = Player(
                     user_id=user_id,
@@ -370,6 +375,7 @@ def api_create_game():
                 time_limit=time_limit,
                 group_id=group_id
             )
+            touch_game(game)
             
             # Создаем первого игрока
             p1 = Player(
@@ -578,6 +584,7 @@ def api_join_game(game_id):
         
         game.players['p2'] = p2
         logger.info(f"API: Пользователь {user_id} присоединился к игре {game_id} как p2")
+        touch_game(game)
         
         # Отправляем уведомление в группу, если игра была создана там
         if game.group_id:
@@ -679,6 +686,8 @@ def api_attack(game_id):
             logger.info(f"API: Ход передан от {player_id} к {opponent_id} (промах)")
         else:
             logger.info(f"API: Ход остается у {player_id} (попадание)")
+
+        touch_game(game)
         
         # Обновляем время последнего хода
         if game.is_timed:
@@ -806,6 +815,8 @@ def api_place_ship(game_id):
                     game.phase = 'battle'
                     logger.info(f"Оба игрока расставили корабли! Игра {game_id} начинается! Первый ход: {game.current_player}")
         
+        touch_game(game)
+
         # Уведомляем через WebSocket обоих игроков
         state_p1 = serialize_game_state(game, 'p1')
         state_p2 = serialize_game_state(game, 'p2')
@@ -850,6 +861,7 @@ def api_remove_ship(game_id):
         # Удаляем корабль из списка
         player.ships.pop(ship_index)
         player.ready = False  # Сбрасываем готовность
+        touch_game(game)
         
         # Уведомляем через WebSocket обоих игроков
         state_p1 = serialize_game_state(game, 'p1')
@@ -889,6 +901,8 @@ def api_auto_place(game_id):
         except Exception as e:
             logger.error(f"Ошибка в auto_place_ships для режима {game.mode}: {e}", exc_info=True)
             raise
+
+        touch_game(game)
         
         # Уведомляем через WebSocket обоих игроков
         state_p1 = serialize_game_state(game, 'p1')
@@ -977,6 +991,88 @@ def api_get_active_game():
         logger.error(f"Ошибка получения активной игры: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
+
+@app.route('/api/game/<game_id>/leave', methods=['POST', 'OPTIONS'])
+def api_leave_game(game_id):
+    """Выйти из игры (p2 освобождает слот, p1 удаляет игру)"""
+    if request.method == 'OPTIONS':
+        return jsonify({}), 200
+    try:
+        data = request.json or {}
+        user_id = data.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'user_id required'}), 400
+        if game_id not in games:
+            return jsonify({'error': 'Game not found'}), 404
+
+        game = games[game_id]
+        player_id = None
+        for pid, pl in game.players.items():
+            if pl and pl.user_id == user_id:
+                player_id = pid
+                break
+        if not player_id:
+            return jsonify({'error': 'Player not in game'}), 400
+
+        # Если выходит создатель (p1) — удаляем игру полностью
+        if player_id == 'p1':
+            room_manager.delete_room_by_game(game_id)
+            games.pop(game_id, None)
+            socketio.emit('game_deleted', {'game_id': game_id}, room=f'game_{game_id}')
+            logger.info(f"Игра {game_id} удалена создателем user_id={user_id}")
+            return jsonify({'status': 'deleted', 'game_id': game_id}), 200
+
+        # Если выходит p2 — освобождаем слот
+        room = room_manager.get_room_by_game_id(game_id)
+        if room:
+            room['joiner'] = None
+            room['status'] = 'WAITING'
+            room['lastActivityAt'] = datetime.now().timestamp()
+
+        game.players['p2'] = None
+        game.current_player = None
+        game.winner = None
+        game.surrendered = None
+        if game.players['p1']:
+            game.players['p1'].ready = False
+        touch_game(game)
+
+        state_p1 = serialize_game_state(game, 'p1')
+        socketio.emit('game_state', state_p1, room=f'game_{game_id}')
+
+        return jsonify({'status': 'left', 'game_state': state_p1}), 200
+    except Exception as e:
+        logger.error(f"Ошибка выхода из игры: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/game/<game_id>/delete', methods=['POST', 'OPTIONS'])
+def api_delete_game(game_id):
+    """Удалить игру (только создатель p1)"""
+    if request.method == 'OPTIONS':
+        return jsonify({}), 200
+    try:
+        data = request.json or {}
+        user_id = data.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'user_id required'}), 400
+        if game_id not in games:
+            return jsonify({'error': 'Game not found'}), 404
+
+        game = games[game_id]
+        p1 = game.players.get('p1')
+        if not p1 or p1.user_id != user_id:
+            return jsonify({'error': 'Only creator can delete game'}), 403
+
+        room_manager.delete_room_by_game(game_id)
+        games.pop(game_id, None)
+        socketio.emit('game_deleted', {'game_id': game_id}, room=f'game_{game_id}')
+        logger.info(f"Игра {game_id} удалена создателем user_id={user_id}")
+        return jsonify({'status': 'deleted', 'game_id': game_id}), 200
+    except Exception as e:
+        logger.error(f"Ошибка удаления игры: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/game/<game_id>/ready', methods=['POST'])
 def api_ready(game_id):
     """Игрок готов"""
@@ -1041,6 +1137,8 @@ def api_ready(game_id):
             logger.info(f"Оба игрока готовы и все корабли расставлены! Игра {game_id} переходит в бой. Первый ход: {game.current_player}")
         else:
             logger.info(f"Игра {game_id}: готовность p1={game.players['p1'].ready if game.players['p1'] else None}, p2={game.players['p2'].ready if game.players['p2'] else None}, ships placed p1={all_ships_placed_player}, p2={all_ships_placed_opponent}")
+
+        touch_game(game)
         
         # Уведомляем через WebSocket обоих игроков
         state_p1 = serialize_game_state(game, 'p1')
@@ -1101,63 +1199,37 @@ def serialize_game_state(game: GameState, player_id: str) -> dict:
     config = get_ship_config(game.mode)
     
     # Определяем фазу игры
-    phase = 'lobby'  # По умолчанию - лобби (ожидание или готовность)
+    phase = 'lobby'  # По умолчанию - ожидание
     
-    # Если есть оба игрока
-    if game.players['p1'] and game.players['p2']:
-        p1 = game.players['p1']
-        p2 = game.players['p2']
-        # Если оба готовы (проверяем готовность обоих игроков)
-        if p1 and p1.ready and p2 and p2.ready:
-            # Проверяем, все ли корабли расставлены у обоих игроков
-            config = get_ship_config(game.mode)
-            required_ships_list = config['ships']
-            required_ships_dict = {}
-            for size in required_ships_list:
-                required_ships_dict[size] = required_ships_dict.get(size, 0) + 1
-            
-            # Проверяем корабли для текущего игрока
-            placed_ships_player = {}
-            if player and player.ships:
-                for ship in player.ships:
-                    if ship and ship.get('size'):
-                        placed_ships_player[ship['size']] = placed_ships_player.get(ship['size'], 0) + 1
-            
-            # Проверяем, все ли корабли размещены у текущего игрока
-            all_ships_placed_player = True
-            for size, count in required_ships_dict.items():
-                placed = placed_ships_player.get(size, 0)
-                if placed < count:
-                    all_ships_placed_player = False
-                    break
-            
-            # Проверяем корабли для обоих игроков
-            placed_ships_opponent = {}
-            if opponent and opponent.ships:
-                for ship in opponent.ships:
-                    if ship and ship.get('size'):
-                        placed_ships_opponent[ship['size']] = placed_ships_opponent.get(ship['size'], 0) + 1
-            
-            # Проверяем, все ли корабли размещены у противника
-            all_ships_placed_opponent = True
-            for size, count in required_ships_dict.items():
-                placed = placed_ships_opponent.get(size, 0)
-                if placed < count:
-                    all_ships_placed_opponent = False
-                    break
-            
-            # Если корабли не расставлены у текущего игрока - фаза setup
-            if not all_ships_placed_player:
-                phase = 'setup'  # Готовы, но нужно расставить корабли
-            elif all_ships_placed_player and all_ships_placed_opponent:
-                # Оба игрока расставили корабли - начинаем бой
-                phase = 'battle'
-            else:
-                # Текущий игрок расставил, но противник еще нет - остаемся в setup
-                phase = 'setup'
+    # Функция проверки расстановки
+    def ships_placed(plr):
+        if not plr or not plr.ships:
+            return False
+        required = get_ship_config(game.mode)['ships']
+        req_dict = {}
+        for s in required:
+            req_dict[s] = req_dict.get(s, 0) + 1
+        placed = {}
+        for ship in plr.ships:
+            if ship and ship.get('size'):
+                placed[ship['size']] = placed.get(ship['size'], 0) + 1
+        return all(placed.get(size, 0) >= count for size, count in req_dict.items())
+
+    player_ships_done = ships_placed(player)
+    opponent_ships_done = ships_placed(opponent)
+
+    # Если нет второго игрока — даём возможность расставлять (setup), иначе лобби
+    if not game.players['p1'] or not game.players['p2']:
+        if player and (player.ships or not player_ships_done):
+            phase = 'setup'
         else:
-            # Есть оба игрока, но не оба готовы - показываем экран готовности (lobby)
             phase = 'lobby'
+    else:
+        # Оба игрока присутствуют
+        if not player_ships_done or not opponent_ships_done:
+            phase = 'setup'
+        else:
+            phase = 'battle'
     
     # Корабли для размещения (для фазы setup)
     ships_to_place = []
@@ -3885,44 +3957,24 @@ async def callback_rules(callback: CallbackQuery):
 
 
 async def cleanup_old_games():
-    """Очистка старых и неактивных игр"""
+    """Очистка старых и неактивных игр (60 минут без активности)"""
+    INACTIVE_TIMEOUT = 60 * 60  # 60 минут
     while True:
         try:
             await asyncio.sleep(300)  # Проверяем каждые 5 минут
             current_time = datetime.now().timestamp()
             games_to_remove = []
             
-            for game_id, game in list(games.items()):  # Используем list() для безопасной итерации
-                # Пропускаем активные игры (игра началась и не завершена)
-                if game.current_player and not game.winner and not game.surrendered:
-                    continue  # Не удаляем активные игры
-                
-                # Пропускаем игры, в которых оба игрока есть и игра еще не завершена (расстановка кораблей)
-                if (game.players['p1'] and game.players['p2'] and 
-                    not game.winner and not game.surrendered and not game.current_player):
-                    # Игра в процессе расстановки - не удаляем
-                    continue
-                
-                # Удаляем игры старше 24 часов
-                if current_time - game.created_at > 86400:  # 24 часа
+            for game_id, game in list(games.items()):
+                last_activity = game.last_activity or game.last_move_time or game.created_at
+                if current_time - last_activity > INACTIVE_TIMEOUT:
                     games_to_remove.append(game_id)
-                    logger.info(f"Удалена старая игра {game_id} (старше 24 часов)")
                     continue
-                
-                # Удаляем игры без второго игрока старше 6 часов (даем больше времени для присоединения)
-                if game.players['p2'] is None and current_time - game.created_at > 21600:  # 6 часов
-                    games_to_remove.append(game_id)
-                    logger.info(f"Удалена неактивная игра {game_id} (без второго игрока более 6 часов)")
-                    continue
-                
-                # Удаляем завершенные игры старше 1 часа
-                if (game.winner or game.surrendered) and current_time - game.created_at > 3600:
-                    games_to_remove.append(game_id)
-                    logger.info(f"Удалена завершенная игра {game_id}")
             
             for game_id in games_to_remove:
-                if game_id in games:
-                    del games[game_id]
+                games.pop(game_id, None)
+                room_manager.delete_room_by_game(game_id)
+                logger.info(f"🧹 Удалена неактивная игра {game_id} (>60 минут без активности)")
             
             if games_to_remove:
                 logger.info(f"Очищено {len(games_to_remove)} игр. Активных игр: {len(games)}")

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { api } from '../utils/api'
 
-export default function GameLobby({ gameId, gameState, playerId, onCreateGame, user, onStateUpdate, socket }) {
+export default function GameLobby({ gameId, gameState, playerId, onCreateGame, user, onStateUpdate, socket, onLeaveGame, onDeleteGame, isCreator }) {
   const [selectedMode, setSelectedMode] = useState('full')
   const [selectedTimer, setSelectedTimer] = useState(false)
   const [creating, setCreating] = useState(false)
@@ -115,7 +115,23 @@ export default function GameLobby({ gameId, gameState, playerId, onCreateGame, u
       
       return (
         <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-blue-50 via-sky-50 to-cyan-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
-          <div className="bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm rounded-2xl shadow-2xl p-8 max-w-md w-full border-4 border-blue-300 dark:border-blue-700">
+          <div className="bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm rounded-2xl shadow-2xl p-8 max-w-md w-full border-4 border-blue-300 dark:border-blue-700 relative">
+            <div className="absolute top-4 right-4 flex gap-2">
+              <button
+                onClick={onLeaveGame}
+                className="px-3 py-2 text-sm bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-all"
+              >
+                🚪 Выйти
+              </button>
+              {isCreator && (
+                <button
+                  onClick={onDeleteGame}
+                  className="px-3 py-2 text-sm bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
+                >
+                  🗑 Удалить
+                </button>
+              )}
+            </div>
             <h1 className="text-4xl font-bold mb-6 text-center text-gray-800 dark:text-gray-200 drop-shadow-lg">
               ⚓ Готовность к игре
             </h1>
@@ -190,7 +206,23 @@ export default function GameLobby({ gameId, gameState, playerId, onCreateGame, u
 
     return (
       <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-blue-50 via-sky-50 to-cyan-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
-        <div className="bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm rounded-2xl shadow-2xl p-8 max-w-md w-full border-4 border-blue-300 dark:border-blue-700">
+        <div className="bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm rounded-2xl shadow-2xl p-8 max-w-md w-full border-4 border-blue-300 dark:border-blue-700 relative">
+          <div className="absolute top-4 right-4 flex gap-2">
+            <button
+              onClick={onLeaveGame}
+              className="px-3 py-2 text-sm bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-all"
+            >
+              🚪 Выйти
+            </button>
+            {isCreator && (
+              <button
+                onClick={onDeleteGame}
+                className="px-3 py-2 text-sm bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
+              >
+                🗑 Удалить
+              </button>
+            )}
+          </div>
           <h1 className="text-4xl font-bold mb-6 text-center text-gray-800 dark:text-gray-200 drop-shadow-lg">
             ⏳ Ожидание игрока
           </h1>

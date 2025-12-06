@@ -42,6 +42,7 @@ class GameState:
     group_id: Optional[int] = None
     created_at: float = field(default_factory=lambda: datetime.now().timestamp())
     last_move_time: Optional[float] = None
+    last_activity: float = field(default_factory=lambda: datetime.now().timestamp())
     rematch_opponent_id: Optional[int] = None  # ID противника для реванша
     setup_message_id: Optional[int] = None  # ID последнего сообщения настройки игры (для создателя)
     last_move_info: Optional[str] = None  # Информация о последнем ходе (мимо, попал, уничтожил)

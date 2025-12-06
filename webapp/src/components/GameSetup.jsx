@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import Board from './Board'
 import { api } from '../utils/api'
 
-export default function GameSetup({ gameState, playerId, onStateUpdate, socket }) {
+export default function GameSetup({ gameState, playerId, onStateUpdate, socket, onLeaveGame, onDeleteGame, isCreator }) {
   const [placingShip, setPlacingShip] = useState(null)
   const [placing, setPlacing] = useState(false)
   const [autoPlaced, setAutoPlaced] = useState(false)
@@ -136,6 +136,22 @@ export default function GameSetup({ gameState, playerId, onStateUpdate, socket }
   return (
     <div className="min-h-screen p-4 pb-20 bg-gradient-to-b from-blue-50 via-sky-50 to-cyan-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
       <div className="max-w-4xl mx-auto">
+        <div className="flex justify-end gap-2 mb-2">
+          <button
+            onClick={onLeaveGame}
+            className="px-3 py-2 text-sm bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-all"
+          >
+            🚪 Выйти
+          </button>
+          {isCreator && (
+            <button
+              onClick={onDeleteGame}
+              className="px-3 py-2 text-sm bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
+            >
+              🗑 Удалить
+            </button>
+          )}
+        </div>
         <h1 className="text-4xl font-bold mb-6 text-center text-gray-800 dark:text-gray-200 drop-shadow-lg">
           ⚓ Расстановка кораблей
         </h1>

@@ -248,6 +248,14 @@ class RoomManager:
         logger.debug(f"Сгенерирована ссылка-приглашение: {link}")
         return link
     
+    def delete_room_by_game(self, game_id: str):
+        """Удалить комнату по game_id"""
+        normalized_game_id = str(game_id).upper().strip()
+        room_code = self.room_by_game_id.pop(normalized_game_id, None)
+        if room_code and room_code in self.rooms:
+            self.rooms.pop(room_code, None)
+            logger.info(f"🗑️ Комната для игры {normalized_game_id} удалена из RoomManager")
+    
     def update_room_status(self, room_code: str, status: str):
         """Обновляет статус комнаты"""
         normalized_code = str(room_code).upper().strip()
@@ -266,7 +274,7 @@ class RoomManager:
     
     def cleanup_inactive_rooms(self):
         """Очистка неактивных комнат"""
-        INACTIVE_TIMEOUT = 30 * 60  # 30 минут в секундах
+        INACTIVE_TIMEOUT = 60 * 60  # 60 минут
         now = datetime.now().timestamp()
         cleaned = 0
         

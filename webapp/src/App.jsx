@@ -342,6 +342,42 @@ function App() {
     }
   }
 
+  const clearLocalGame = () => {
+    localStorage.removeItem('activeGameId')
+    localStorage.removeItem('roomCode')
+    setGameId(null)
+    setGameState(null)
+    setPlayerId(null)
+  }
+
+  const leaveGame = async () => {
+    if (!gameId || !user) return
+    try {
+      setLoading(true)
+      await api.post(`/api/game/${gameId}/leave`, { user_id: user.id })
+      clearLocalGame()
+    } catch (err) {
+      console.error('Ошибка выхода из игры:', err)
+      setError(err.message || 'Ошибка выхода из игры')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const deleteGame = async () => {
+    if (!gameId || !user) return
+    try {
+      setLoading(true)
+      await api.post(`/api/game/${gameId}/delete`, { user_id: user.id })
+      clearLocalGame()
+    } catch (err) {
+      console.error('Ошибка удаления игры:', err)
+      setError(err.message || 'Ошибка удаления игры')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   if (authLoading || loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -374,34 +410,43 @@ function App() {
 
   // Если нет игры - показываем лобби (создание игры)
   if (!gameState || !gameState.id) {
-    return <GameLobby gameId={gameId} onCreateGame={createGame} user={user} />
+    return <GameLobby gameId={gameId} onCreateGame={createGame} user={user} onLeaveGame={leaveGame} onDeleteGame={deleteGame} isCreator={false} />
   }
 
   // Если игра в лобби (ожидание второго игрока или готовность)
   if (gameState.phase === 'lobby') {
-    return <GameLobby gameId={gameId} gameState={gameState} playerId={playerId} onCreateGame={createGame} user={user} onStateUpdate={setGameState} socket={socket} />
+    const isCreator = playerId === 'p1' && gameState.players?.p1?.user_id === user?.id
+    return <GameLobby gameId={gameId} gameState={gameState} playerId={playerId} onCreateGame={createGame} user={user} onStateUpdate={setGameState} socket={socket} onLeaveGame={leaveGame} onDeleteGame={deleteGame} isCreator={isCreator} />
   }
 
   // Если игра в расстановке
   if (gameState.phase === 'setup') {
+    const isCreator = playerId === 'p1' && gameState.players?.p1?.user_id === user?.id
     return (
       <GameSetup
         gameState={gameState}
         playerId={playerId}
         onStateUpdate={setGameState}
         socket={socket}
+        onLeaveGame={leaveGame}
+        onDeleteGame={deleteGame}
+        isCreator={isCreator}
       />
     )
   }
 
   // Если игра в бою
   if (gameState.phase === 'battle') {
+    const isCreator = playerId === 'p1' && gameState.players?.p1?.user_id === user?.id
     return (
       <GameBoard
         gameState={gameState}
         playerId={playerId}
         onStateUpdate={setGameState}
         socket={socket}
+        onLeaveGame={leaveGame}
+        onDeleteGame={deleteGame}
+        isCreator={isCreator}
       />
     )
   }
